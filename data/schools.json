@@ -1,0 +1,86 @@
+[
+  {
+    "name": "Tallinna Reaalkool",
+    "lat": 59.4317,
+    "lon": 24.7566,
+    "dismissals": ["12:15", "13:10", "14:05", "15:00", "15:50"],
+    "nearStops": ["Estonia", "Vabaduse väljak"]
+  },
+  {
+    "name": "Gustav Adolfi Gümnaasium",
+    "lat": 59.4388,
+    "lon": 24.7438,
+    "dismissals": ["12:20", "13:15", "14:10", "15:05", "15:55"],
+    "nearStops": ["Balti jaam", "Vabaduse väljak"]
+  },
+  {
+    "name": "Tallinna Inglise Kolledž",
+    "lat": 59.4337,
+    "lon": 24.7455,
+    "dismissals": ["12:10", "13:05", "14:00", "14:55", "15:45"],
+    "nearStops": ["Vabaduse väljak", "Estonia"]
+  },
+  {
+    "name": "Tallinna 21. Kool",
+    "lat": 59.4378,
+    "lon": 24.7701,
+    "dismissals": ["12:15", "13:10", "14:05", "15:00", "15:50"],
+    "nearStops": ["Pronksi", "Hobujaama"]
+  },
+  {
+    "name": "Jakob Westholmi Gümnaasium",
+    "lat": 59.4305,
+    "lon": 24.7352,
+    "dismissals": ["12:20", "13:15", "14:10", "15:05", "15:55"],
+    "nearStops": ["Koidu", "Kosmos"]
+  },
+  {
+    "name": "Pelgulinna Gümnaasium",
+    "lat": 59.4439,
+    "lon": 24.7116,
+    "dismissals": ["12:10", "13:05", "14:00", "14:55", "15:45"],
+    "nearStops": ["Ristiku", "Telliskivi"]
+  },
+  {
+    "name": "Tallinna Kristiine Gümnaasium",
+    "lat": 59.4249,
+    "lon": 24.7048,
+    "dismissals": ["12:15", "13:10", "14:05", "15:00", "15:50"],
+    "nearStops": ["Löwenruh", "Tondi"]
+  },
+  {
+    "name": "Tallinna Mustamäe Gümnaasium",
+    "lat": 59.4048,
+    "lon": 24.6817,
+    "dismissals": ["12:20", "13:15", "14:10", "15:05", "15:55"],
+    "nearStops": ["Mustamäe", "Akadeemia tee"]
+  },
+  {
+    "name": "Tallinna Arte Gümnaasium",
+    "lat": 59.4084,
+    "lon": 24.6609,
+    "dismissals": ["12:10", "13:05", "14:00", "14:55", "15:45"],
+    "nearStops": ["Vilde tee", "Kadaka"]
+  },
+  {
+    "name": "Tallinna Südalinna Kool",
+    "lat": 59.4321,
+    "lon": 24.7633,
+    "dismissals": ["12:15", "13:10", "14:05", "15:00", "15:50"],
+    "nearStops": ["Estonia", "Tornimäe"]
+  },
+  {
+    "name": "Tallinna Kuristiku Gümnaasium",
+    "lat": 59.4499,
+    "lon": 24.8799,
+    "dismissals": ["12:20", "13:15", "14:10", "15:05", "15:55"],
+    "nearStops": ["Kuristiku", "Priisle"]
+  },
+  {
+    "name": "Lasnamäe Gümnaasium",
+    "lat": 59.4382,
+    "lon": 24.8581,
+    "dismissals": ["12:10", "13:05", "14:00", "14:55", "15:45"],
+    "nearStops": ["Linnamäe tee", "Kalevipoja"]
+  }
+]

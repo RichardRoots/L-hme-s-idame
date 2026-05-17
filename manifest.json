@@ -1,0 +1,18 @@
+{
+  "name": "BussRadar Tallinn",
+  "short_name": "BussRadar",
+  "description": "Tallinna busside live-kaart, peatuste väljumised, ilm ja koolide liikumisvood.",
+  "start_url": "index.php",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#eef3f0",
+  "theme_color": "#0f5e62",
+  "icons": [
+    {
+      "src": "assets/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

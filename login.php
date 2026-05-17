@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="et">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0f5e62">
+  <title>Logi sisse | BussRadar Tallinn</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://unpkg.com">
+  <link rel="stylesheet" href="assets/css/styles.css">
+</head>
+<body>
+  <div class="auth-shell">
+    <header class="topbar">
+      <a class="brand" href="index.php" aria-label="BussRadar Tallinn kaart">
+        <span class="brand-mark"><i data-lucide="bus-front"></i></span>
+        <span>
+          <strong>BussRadar</strong>
+          <small>Tallinn</small>
+        </span>
+      </a>
+
+      <div class="topbar-actions">
+        <button class="icon-button" id="themeToggle" type="button" title="Tume režiim" aria-label="Tume režiim">
+          <i data-lucide="moon"></i>
+        </button>
+        <a class="install-button" href="index.php">
+          <i data-lucide="map"></i>
+          <span>Kaart</span>
+        </a>
+      </div>
+    </header>
+
+    <main class="auth-page">
+      <section class="panel-block auth-card" aria-label="Sisselogimine">
+        <div class="block-heading">
+          <h1>Konto</h1>
+          <span id="authStatus">Pole sisse logitud</span>
+        </div>
+
+        <form class="auth-form" id="authForm">
+          <label class="field-label" for="authUsername">Kasutajanimi</label>
+          <input id="authUsername" name="username" type="text" autocomplete="username" spellcheck="false">
+
+          <label class="field-label" for="authPassword">Parool</label>
+          <input id="authPassword" name="password" type="password" autocomplete="current-password">
+
+          <div class="account-actions">
+            <button class="tool-button" id="loginButton" type="submit">
+              <i data-lucide="log-in"></i>
+              <span>Logi sisse</span>
+            </button>
+            <button class="tool-button secondary" id="registerButton" type="button">
+              <i data-lucide="user-plus"></i>
+              <span>Loo konto</span>
+            </button>
+          </div>
+        </form>
+
+        <div class="signed-in-actions" id="signedInActions" hidden>
+          <a class="tool-button" href="index.php">
+            <i data-lucide="map"></i>
+            <span>Ava kaart</span>
+          </a>
+          <button class="tool-button account-logout" id="logoutButton" type="button">
+            <i data-lucide="log-out"></i>
+            <span>Logi välja</span>
+          </button>
+        </div>
+
+        <div class="account-message" id="authMessage"></div>
+      </section>
+    </main>
+  </div>
+
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+  <script src="assets/js/auth.js" defer></script>
+</body>
+</html>
