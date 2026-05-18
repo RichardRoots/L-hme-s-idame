@@ -19,6 +19,11 @@
   --map-bg: #edf2ef;
   --legend-bg: rgba(255, 255, 255, 0.94);
   --tile-filter: saturate(0.72) contrast(0.94) brightness(1.04);
+  --motion-fast: 160ms;
+  --motion-medium: 260ms;
+  --motion-slow: 420ms;
+  --motion-curve: cubic-bezier(0.22, 1, 0.36, 1);
+  --vehicle-move-ms: 7200ms;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
@@ -158,6 +163,34 @@ button {
   gap: 8px;
 }
 
+.schedule-open-button {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 8px;
+  padding: 0 13px;
+  border: 1px solid color-mix(in srgb, var(--brand) 38%, var(--line));
+  border-radius: 8px;
+  color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 8%, var(--panel));
+  font-weight: 850;
+  white-space: nowrap;
+  transition: border-color var(--motion-fast) ease, background var(--motion-fast) ease, transform var(--motion-fast) var(--motion-curve);
+}
+
+.schedule-open-button:hover,
+.schedule-open-button.is-active {
+  border-color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 14%, var(--panel));
+  transform: translateY(-1px);
+}
+
+.schedule-open-button svg {
+  width: 18px;
+  height: 18px;
+}
+
 .status-pill {
   display: inline-flex;
   align-items: center;
@@ -201,7 +234,7 @@ button {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  transition: border-color 160ms ease, transform 160ms ease, background 160ms ease;
+  transition: border-color var(--motion-fast) ease, transform var(--motion-fast) var(--motion-curve), background var(--motion-fast) ease, box-shadow var(--motion-fast) ease;
 }
 
 .icon-button {
@@ -251,6 +284,14 @@ button {
   border-color: var(--brand-2);
 }
 
+.icon-button.is-loading svg {
+  animation: smoothSpin 920ms linear infinite;
+}
+
+body.is-live-refreshing .status-pill {
+  animation: softStatusPulse 1.2s ease-in-out infinite;
+}
+
 .icon-button.muted {
   color: var(--muted);
   background: var(--panel-soft);
@@ -261,6 +302,103 @@ button {
 .install-button svg {
   width: 18px;
   height: 18px;
+  transform-origin: 50% 50%;
+  transition: transform var(--motion-fast) var(--motion-curve);
+}
+
+.schedule-panel {
+  position: fixed;
+  top: 82px;
+  left: 14px;
+  z-index: 1100;
+  width: min(880px, calc(100vw - 28px));
+  max-height: calc(100dvh - 96px);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-8px);
+  transition: opacity var(--motion-medium) ease, transform var(--motion-medium) var(--motion-curve);
+}
+
+.schedule-panel.is-open {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.schedule-panel-card {
+  max-height: calc(100dvh - 96px);
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 12px;
+  overflow: hidden;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel) 96%, transparent);
+  box-shadow: 0 24px 70px rgba(18, 34, 31, 0.18);
+  backdrop-filter: blur(16px);
+}
+
+.schedule-panel-drag {
+  display: none;
+}
+
+.schedule-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.schedule-panel-head strong,
+.schedule-panel-head span {
+  display: block;
+}
+
+.schedule-panel-head strong {
+  font-size: 1.08rem;
+}
+
+.schedule-panel-head span {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.schedule-picker-grid {
+  display: grid;
+  grid-template-columns: minmax(120px, 150px) minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+}
+
+.schedule-picker-field {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.schedule-picker-field span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+
+.schedule-picker-field select {
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  padding: 0 34px 0 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  background: var(--input-bg);
+  outline: none;
+}
+
+.schedule-picker-field select:focus {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px rgba(15, 94, 98, 0.13);
 }
 
 .workspace {
@@ -333,6 +471,15 @@ button {
   padding: 14px;
   background: var(--panel-soft);
   border-right: 1px solid var(--line);
+}
+
+.panel-collapse-toggle {
+  display: none;
+}
+
+.user-location-marker {
+  filter: drop-shadow(0 2px 6px rgba(15, 94, 98, 0.35));
+  transition: opacity var(--motion-medium) ease, stroke var(--motion-medium) ease, fill var(--motion-medium) ease;
 }
 
 .panel-block {
@@ -443,6 +590,7 @@ button {
   border-radius: 8px;
   background: color-mix(in srgb, var(--line-color, var(--brand)) 9%, var(--panel));
   box-shadow: 0 6px 18px rgba(18, 34, 31, 0.05);
+  transition: border-color var(--motion-medium) ease, background var(--motion-medium) ease, box-shadow var(--motion-medium) ease, transform var(--motion-fast) var(--motion-curve);
 }
 
 .line-color-picker {
@@ -511,6 +659,7 @@ button {
   border-radius: 999px;
   background: var(--line-color, var(--brand));
   transform: translateY(-50%);
+  transition: border-color var(--motion-medium) ease, background var(--motion-medium) ease;
 }
 
 .line-slider-fill {
@@ -519,6 +668,7 @@ button {
   display: block;
   border-radius: inherit;
   background: var(--line-color, var(--brand));
+  transition: width var(--motion-medium) var(--motion-curve), background var(--motion-medium) ease;
 }
 
 .line-slider-thumb {
@@ -534,6 +684,7 @@ button {
   box-shadow: 0 2px 7px rgba(18, 34, 31, 0.26);
   pointer-events: none;
   transform: translate(-50%, -50%);
+  transition: left var(--motion-medium) var(--motion-curve), background var(--motion-medium) ease, box-shadow var(--motion-medium) ease;
 }
 
 .line-opacity-control input[type="range"] {
@@ -690,6 +841,14 @@ button {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--item-bg);
+  animation: itemEnter var(--motion-slow) var(--motion-curve) both;
+  transition: border-color var(--motion-fast) ease, background var(--motion-fast) ease, box-shadow var(--motion-fast) ease, transform var(--motion-fast) var(--motion-curve);
+}
+
+.favorite-stop-row:hover {
+  border-color: color-mix(in srgb, var(--brand) 35%, var(--line));
+  box-shadow: 0 5px 14px rgba(18, 34, 31, 0.07);
+  transform: translateY(-1px);
 }
 
 .favorite-stop-focus {
@@ -777,11 +936,15 @@ button {
   background: var(--item-bg);
   border: 1px solid var(--line);
   border-radius: 8px;
+  transition: border-color var(--motion-fast) ease, background var(--motion-fast) ease, box-shadow var(--motion-fast) ease, transform var(--motion-fast) var(--motion-curve);
+  animation: itemEnter var(--motion-slow) var(--motion-curve) both;
 }
 
 .vehicle-row:hover {
   border-color: #95c9c5;
   background: var(--item-hover);
+  box-shadow: 0 5px 14px rgba(18, 34, 31, 0.08);
+  transform: translateY(-1px);
 }
 
 .vehicle-row.risk-medium {
@@ -917,6 +1080,550 @@ button {
   text-align: right;
 }
 
+.schedule-form {
+  display: grid;
+  gap: 8px;
+}
+
+.schedule-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  min-width: 0;
+}
+
+.schedule-controls select {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  padding: 0 34px 0 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  background: var(--input-bg);
+  outline: none;
+}
+
+.schedule-controls select:focus {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px rgba(15, 94, 98, 0.13);
+}
+
+.schedule-directions,
+.schedule-list,
+.schedule-stops {
+  display: grid;
+  gap: 7px;
+}
+
+.schedule-directions,
+.schedule-list {
+  margin-top: 10px;
+}
+
+.schedule-direction {
+  width: 100%;
+  min-height: 48px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  padding: 7px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: inherit;
+  background: var(--item-bg);
+  text-align: left;
+}
+
+.schedule-direction.is-active {
+  border-color: color-mix(in srgb, var(--brand) 48%, var(--line));
+  background: color-mix(in srgb, var(--brand) 10%, var(--panel));
+}
+
+.schedule-direction strong,
+.schedule-direction small,
+.schedule-route-head strong,
+.schedule-route-head small,
+.schedule-stop-main strong,
+.schedule-stop-main small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.schedule-direction small,
+.schedule-route-head small,
+.schedule-stop-main small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.schedule-route-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-soft);
+}
+
+.schedule-stops {
+  max-height: 320px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.schedule-stop {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(94px, auto);
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--item-bg);
+}
+
+.schedule-stop-focus {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+}
+
+.schedule-stop-order {
+  width: 28px;
+  height: 28px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--brand);
+  background: var(--panel);
+  font-size: 0.75rem;
+  font-weight: 900;
+}
+
+.schedule-stop-times {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-align: right;
+}
+
+.schedule-time-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 7px;
+  border: 1px solid color-mix(in srgb, var(--brand) 32%, var(--line));
+  border-radius: 999px;
+  color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 8%, var(--panel));
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.schedule-time-empty {
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.schedule-board {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.schedule-panel .schedule-list {
+  min-height: 0;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.schedule-panel .schedule-board {
+  align-items: start;
+}
+
+.schedule-stop-nav {
+  max-height: 230px;
+  display: grid;
+  gap: 2px;
+  overflow: auto;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel-soft) 78%, var(--panel));
+}
+
+.schedule-stop-nav.has-trip-times {
+  border-color: color-mix(in srgb, var(--brand) 38%, var(--line));
+  background: color-mix(in srgb, var(--brand) 6%, var(--panel-soft));
+}
+
+.schedule-stop-nav-head {
+  position: sticky;
+  top: -5px;
+  z-index: 2;
+  display: grid;
+  gap: 2px;
+  padding: 7px 8px;
+  margin: -5px -5px 4px;
+  border-bottom: 1px solid color-mix(in srgb, var(--brand) 28%, var(--line));
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
+  backdrop-filter: blur(10px);
+}
+
+.schedule-stop-nav-head strong,
+.schedule-stop-nav-head small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.schedule-stop-nav-head strong {
+  color: var(--ink);
+  font-size: 0.83rem;
+}
+
+.schedule-stop-nav-head small {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.schedule-stop-link {
+  width: 100%;
+  min-height: 30px;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 5px 7px;
+  border: 0;
+  border-radius: 6px;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+  transition: background var(--motion-fast) ease, box-shadow var(--motion-fast) ease, transform var(--motion-fast) var(--motion-curve);
+}
+
+.schedule-stop-link:hover {
+  background: var(--item-bg);
+}
+
+.schedule-stop-link.is-active {
+  background: var(--panel);
+  box-shadow: inset 3px 0 0 var(--brand);
+}
+
+.schedule-stop-link span {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.schedule-stop-link strong {
+  overflow: hidden;
+  font-size: 0.82rem;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.schedule-detail {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.schedule-route-head em {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-style: normal;
+  line-height: 1.25;
+  white-space: normal;
+}
+
+.schedule-next {
+  display: grid;
+  gap: 7px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--item-bg);
+}
+
+.schedule-next > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+
+.schedule-next svg {
+  width: 16px;
+  height: 16px;
+}
+
+.schedule-next div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.schedule-next strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.95rem;
+}
+
+.schedule-timetable-grid {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.schedule-table {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-spacing: 0;
+  border-collapse: separate;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--panel);
+  font-size: 0.8rem;
+}
+
+.schedule-table th,
+.schedule-table td {
+  border-bottom: 1px solid var(--line);
+  padding: 5px 7px;
+  vertical-align: top;
+}
+
+.schedule-table thead th {
+  background: var(--panel-soft);
+  color: var(--ink);
+  font-size: 0.76rem;
+  font-weight: 900;
+}
+
+.schedule-table tbody tr:last-child th,
+.schedule-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.schedule-table tbody th {
+  width: 34px;
+  color: var(--ink);
+  background: color-mix(in srgb, var(--panel-soft) 76%, var(--panel));
+  font-variant-numeric: tabular-nums;
+}
+
+.schedule-table td {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+}
+
+.schedule-time-button {
+  min-width: 20px;
+  display: inline-block;
+  padding: 1px 2px;
+  border: 0;
+  border-bottom: 2px solid #2563eb;
+  border-radius: 3px 3px 0 0;
+  color: var(--ink);
+  background: color-mix(in srgb, #dbeafe 62%, transparent);
+  text-align: center;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  transition: background var(--motion-fast) ease, border-color var(--motion-fast) ease, color var(--motion-fast) ease, outline-color var(--motion-fast) ease, transform var(--motion-fast) var(--motion-curve);
+}
+
+.schedule-time-button:hover,
+.schedule-time-button.is-selected {
+  outline: 2px solid color-mix(in srgb, var(--brand) 55%, transparent);
+  outline-offset: 1px;
+  background: color-mix(in srgb, var(--brand) 18%, #dbeafe);
+  transform: translateY(-1px);
+}
+
+.schedule-time-button.is-next {
+  color: #111827;
+  background: #dbeafe;
+  font-weight: 900;
+}
+
+.schedule-time-button.is-selected {
+  border-bottom-color: var(--brand);
+  color: var(--ink);
+  font-weight: 950;
+}
+
+.schedule-table td small {
+  color: var(--muted);
+}
+
+.schedule-trip-detail {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--brand) 34%, var(--line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--brand) 8%, var(--panel));
+}
+
+.schedule-trip-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+}
+
+.schedule-trip-head strong,
+.schedule-trip-head small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.schedule-trip-head small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.schedule-trip-timeline {
+  max-height: 260px;
+  display: grid;
+  gap: 0;
+  overflow: auto;
+  padding: 2px 2px 2px 0;
+}
+
+.schedule-trip-stop {
+  position: relative;
+  display: grid;
+  grid-template-columns: 48px 16px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  min-height: 28px;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.schedule-trip-stop::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 55px;
+  width: 2px;
+  background: color-mix(in srgb, var(--brand) 30%, var(--line));
+}
+
+.schedule-trip-stop:first-child::before {
+  top: 50%;
+}
+
+.schedule-trip-stop:last-child::before {
+  bottom: 50%;
+}
+
+.schedule-trip-stop time {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  font-weight: 850;
+}
+
+.schedule-trip-dot {
+  position: relative;
+  z-index: 1;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--brand);
+  border-radius: 999px;
+  background: var(--panel);
+}
+
+.schedule-trip-stop strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 0.82rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.schedule-trip-stop.is-current {
+  min-height: 32px;
+  color: var(--ink);
+}
+
+.schedule-trip-stop.is-current .schedule-trip-dot {
+  width: 13px;
+  height: 13px;
+  background: var(--brand);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--brand) 18%, transparent);
+}
+
+.schedule-trip-stop.is-current strong {
+  font-weight: 950;
+}
+
+.schedule-info {
+  color: var(--ink);
+  font-size: 0.82rem;
+}
+
+@media (min-width: 780px) {
+  .schedule-panel .schedule-board {
+    grid-template-columns: minmax(190px, 230px) minmax(0, 1fr);
+  }
+
+  .schedule-panel .schedule-stop-nav {
+    max-height: calc(100dvh - 260px);
+  }
+
+  .schedule-panel .schedule-timetable-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    align-items: start;
+  }
+}
+
+:root[data-theme="dark"] .schedule-time-button {
+  color: #e7f0ff;
+  background: rgba(37, 99, 235, 0.2);
+}
+
+:root[data-theme="dark"] .schedule-time-button.is-next {
+  color: #ffffff;
+  background: rgba(37, 99, 235, 0.34);
+}
+
 .departure-list,
 .delay-list,
 .crowd-list {
@@ -935,6 +1642,8 @@ button {
   border-radius: 8px;
   border: 1px solid var(--line);
   background: var(--item-bg);
+  animation: itemEnter var(--motion-slow) var(--motion-curve) both;
+  transition: border-color var(--motion-medium) ease, background var(--motion-medium) ease, box-shadow var(--motion-medium) ease, transform var(--motion-fast) var(--motion-curve);
 }
 
 .departure.late {
@@ -1012,6 +1721,8 @@ button {
   border-radius: 8px;
   border: 1px solid var(--line);
   background: var(--item-bg);
+  animation: itemEnter var(--motion-slow) var(--motion-curve) both;
+  transition: border-color var(--motion-medium) ease, background var(--motion-medium) ease, box-shadow var(--motion-medium) ease;
 }
 
 .crowd-item strong,
@@ -1117,7 +1828,11 @@ button {
 
 #map .leaflet-tile-pane {
   filter: var(--tile-filter);
-  transition: filter 180ms ease;
+  transition: filter var(--motion-medium) ease;
+}
+
+#map .leaflet-overlay-pane path {
+  transition: stroke var(--motion-medium) ease, stroke-opacity var(--motion-medium) ease, opacity var(--motion-medium) ease, fill-opacity var(--motion-medium) ease;
 }
 
 #map .leaflet-popup-content-wrapper,
@@ -1126,6 +1841,7 @@ button {
 #map .leaflet-control-attribution {
   color: var(--ink);
   background: var(--panel);
+  transition: background var(--motion-medium) ease, color var(--motion-medium) ease, border-color var(--motion-medium) ease, box-shadow var(--motion-medium) ease;
 }
 
 #map .leaflet-control-zoom a {
@@ -1300,8 +2016,13 @@ button {
 
 .vehicle-marker.leaflet-marker-icon {
   position: absolute;
-  transition: transform 900ms linear, opacity 160ms ease;
-  will-change: transform;
+  transition: transform var(--vehicle-move-ms) linear, opacity var(--motion-medium) ease;
+  will-change: transform, opacity;
+}
+
+.leaflet-zoom-anim .vehicle-marker.leaflet-marker-icon,
+.leaflet-dragging .vehicle-marker.leaflet-marker-icon {
+  transition: none;
 }
 
 .vehicle-icon-wrap {
@@ -1312,6 +2033,8 @@ button {
   align-items: center;
   gap: 3px;
   pointer-events: none;
+  animation: markerArrive var(--motion-slow) var(--motion-curve) both;
+  will-change: transform, opacity;
 }
 
 .vehicle-pin {
@@ -1325,6 +2048,7 @@ button {
   border: 3px solid #fff;
   border-radius: 999px;
   box-shadow: 0 8px 18px rgba(18, 34, 31, 0.3);
+  transition: background var(--motion-medium) ease, box-shadow var(--motion-medium) ease, transform var(--motion-fast) var(--motion-curve), border-color var(--motion-medium) ease;
 }
 
 .vehicle-pulse {
@@ -1358,6 +2082,7 @@ button {
   box-shadow: 0 3px 8px rgba(18, 34, 31, 0.25);
   transform: translateX(-50%) rotate(var(--bearing, 0deg));
   transform-origin: 50% 50%;
+  transition: transform 640ms var(--motion-curve), background var(--motion-medium) ease, box-shadow var(--motion-medium) ease;
   z-index: 3;
 }
 
@@ -1405,6 +2130,7 @@ button {
   font-size: 0.6rem;
   font-weight: 950;
   line-height: 1;
+  transition: background var(--motion-medium) ease, color var(--motion-medium) ease, transform var(--motion-fast) var(--motion-curve);
 }
 
 .vehicle-type-badge.type-electric {
@@ -1462,7 +2188,7 @@ button {
   text-align: center;
   text-overflow: ellipsis;
   transform: translateY(-2px);
-  transition: opacity 140ms ease, transform 140ms ease;
+  transition: opacity var(--motion-medium) ease, transform var(--motion-medium) var(--motion-curve), background var(--motion-medium) ease;
   white-space: nowrap;
 }
 
@@ -1495,6 +2221,85 @@ button {
 
 .vehicle-marker.risk-high .vehicle-risk-badge {
   animation: riskBadgePulse 1.45s ease-in-out infinite;
+}
+
+.schedule-stop-highlight-marker {
+  border: 0;
+  background: transparent;
+}
+
+.schedule-stop-highlight-pin {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  height: 34px;
+  padding: 0 11px 0 7px;
+  border: 2px solid #ffffff;
+  border-radius: 999px;
+  color: #073f3b;
+  background: color-mix(in srgb, var(--brand) 13%, #ffffff);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 28%, transparent), 0 9px 20px rgba(18, 34, 31, 0.24);
+}
+
+.schedule-stop-highlight-pin::after {
+  content: "";
+  position: absolute;
+  left: 13px;
+  bottom: -7px;
+  width: 10px;
+  height: 10px;
+  border-right: 2px solid #ffffff;
+  border-bottom: 2px solid #ffffff;
+  background: color-mix(in srgb, var(--brand) 20%, #ffffff);
+  transform: rotate(45deg);
+}
+
+.schedule-stop-highlight-pin > span {
+  position: relative;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  border: 3px solid var(--brand);
+  border-radius: 999px;
+  background: #ffffff;
+}
+
+.schedule-stop-highlight-pin > span::before {
+  content: "";
+  position: absolute;
+  inset: -9px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--brand) 24%, transparent);
+  animation: markerPulse 1.5s ease-out infinite;
+}
+
+.schedule-stop-highlight-pin strong {
+  position: relative;
+  z-index: 1;
+  max-width: 112px;
+  overflow: hidden;
+  font-size: 0.78rem;
+  font-weight: 950;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:root[data-theme="dark"] .schedule-stop-highlight-pin {
+  color: #dff8f4;
+  border-color: #172321;
+  background: color-mix(in srgb, var(--brand) 28%, #15211f);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 34%, transparent), 0 9px 20px rgba(0, 0, 0, 0.36);
+}
+
+:root[data-theme="dark"] .schedule-stop-highlight-pin::after {
+  border-color: #172321;
+  background: color-mix(in srgb, var(--brand) 34%, #15211f);
+}
+
+:root[data-theme="dark"] .schedule-stop-highlight-pin > span {
+  background: #101a18;
 }
 
 .favorite-stop-marker {
@@ -1594,8 +2399,62 @@ button {
   }
 }
 
+@keyframes markerArrive {
+  0% {
+    opacity: 0;
+    transform: translateY(5px) scale(0.96);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes popupEnter {
+  0% {
+    opacity: 0;
+    transform: translateY(5px) scale(0.985);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes itemEnter {
+  0% {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes smoothSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes softStatusPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(15, 94, 98, 0);
+  }
+
+  50% {
+    box-shadow: 0 0 0 4px rgba(15, 94, 98, 0.12);
+  }
+}
+
 .popup-card {
   min-width: 180px;
+  animation: popupEnter var(--motion-medium) var(--motion-curve) both;
 }
 
 .popup-card strong,
@@ -1710,6 +2569,10 @@ button {
   width: 18px;
   height: 18px;
   margin-bottom: 5px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
   color: var(--brand);
   stroke-width: 2.4;
 }
@@ -1863,6 +2726,8 @@ button {
   border-radius: 8px;
   background: var(--panel-soft);
   border: 1px solid var(--line);
+  animation: itemEnter var(--motion-slow) var(--motion-curve) both;
+  transition: background var(--motion-medium) ease, border-color var(--motion-medium) ease;
 }
 
 .popup-departure span:last-child {
@@ -1920,13 +2785,208 @@ button {
     display: none;
   }
 
+  .schedule-panel {
+    --schedule-panel-height: min(62dvh, 560px);
+    top: auto;
+    left: 10px;
+    right: 10px;
+    bottom: 10px;
+    width: auto;
+    max-height: var(--schedule-panel-height);
+    transform: translateY(18px);
+  }
+
+  .schedule-panel.is-resizing {
+    transition: none;
+  }
+
+  .schedule-panel-card {
+    position: relative;
+    height: var(--schedule-panel-height);
+    max-height: var(--schedule-panel-height);
+    gap: 9px;
+    padding: 17px 10px 10px;
+    border-radius: 14px 14px 10px 10px;
+    box-shadow: 0 -18px 48px rgba(18, 34, 31, 0.2);
+    backdrop-filter: blur(18px);
+  }
+
+  .schedule-panel-drag {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    z-index: 4;
+    width: 90px;
+    height: 25px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: 0;
+    color: var(--muted);
+    background: transparent;
+    cursor: ns-resize;
+    touch-action: none;
+    transform: translateX(-50%);
+  }
+
+  .schedule-panel-drag span {
+    width: 38px;
+    height: 4px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--muted) 42%, transparent);
+    transition: width 140ms ease, background 140ms ease;
+  }
+
+  .schedule-panel-drag:hover span,
+  .schedule-panel-drag:focus-visible span,
+  .schedule-panel.is-resizing .schedule-panel-drag span {
+    width: 48px;
+    background: color-mix(in srgb, var(--brand) 55%, var(--muted));
+  }
+
+  .schedule-panel-drag:focus-visible {
+    outline: none;
+  }
+
+  .schedule-panel.is-open ~ .workspace {
+    grid-template-rows: minmax(0, 1fr) 54px;
+  }
+
+  .schedule-panel.is-open ~ .workspace .side-panel {
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .schedule-panel-head {
+    gap: 8px;
+  }
+
+  .schedule-panel-head strong {
+    font-size: 1rem;
+  }
+
+  .schedule-panel-head span {
+    font-size: 0.78rem;
+  }
+
+  .schedule-picker-grid {
+    grid-template-columns: minmax(82px, 104px) minmax(0, 1fr) 42px;
+    gap: 6px;
+  }
+
+  .schedule-picker-field {
+    gap: 4px;
+  }
+
+  .schedule-picker-field span {
+    font-size: 0.7rem;
+  }
+
+  .schedule-picker-field select {
+    min-height: 38px;
+    padding: 0 28px 0 9px;
+    font-size: 0.86rem;
+  }
+
+  .schedule-picker-grid .tool-button {
+    width: 42px;
+    min-height: 38px;
+    padding: 0;
+  }
+
+  .schedule-picker-grid .tool-button span {
+    display: none;
+  }
+
+  .schedule-panel .schedule-list {
+    margin-top: 0;
+    padding-right: 0;
+  }
+
+  .schedule-panel .schedule-board {
+    gap: 8px;
+  }
+
+  .schedule-panel .schedule-stop-nav {
+    max-height: min(25dvh, 178px);
+    padding: 4px;
+  }
+
+  .schedule-stop-link {
+    min-height: 34px;
+    grid-template-columns: 42px minmax(0, 1fr);
+    padding: 6px 7px;
+  }
+
+  .schedule-stop-link strong {
+    font-size: 0.84rem;
+  }
+
+  .schedule-detail {
+    gap: 8px;
+  }
+
+  .schedule-route-head,
+  .schedule-next {
+    padding: 8px;
+  }
+
+  .schedule-route-head em {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+
+  .schedule-next div {
+    gap: 6px;
+  }
+
+  .schedule-next strong {
+    font-size: 0.9rem;
+  }
+
+  .schedule-timetable-grid {
+    gap: 8px;
+  }
+
+  .schedule-table {
+    font-size: 0.78rem;
+  }
+
+  .schedule-table th,
+  .schedule-table td {
+    padding: 4px 5px;
+  }
+
+  .schedule-table td {
+    gap: 3px 5px;
+  }
+
+  .schedule-info {
+    font-size: 0.76rem;
+  }
+
   .workspace {
+    --side-panel-height: minmax(300px, 50dvh);
+    --map-strip-height: 24px;
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(42vh, 1fr) minmax(300px, 50dvh);
+    grid-template-rows: minmax(var(--map-strip-height), 1fr) var(--side-panel-height);
     width: 100vw;
     max-width: 100vw;
     height: calc(100vh - 60px);
     height: calc(100dvh - 60px);
+    transition: grid-template-rows var(--motion-slow) var(--motion-curve);
+  }
+
+  .workspace.panel-collapsed {
+    --side-panel-height: 56px;
+    grid-template-rows: minmax(0, 1fr) var(--side-panel-height);
+  }
+
+  .workspace.panel-resizing {
+    transition: none;
+    user-select: none;
   }
 
   .map-area {
@@ -1938,16 +2998,70 @@ button {
   }
 
   .side-panel {
+    position: relative;
     width: 100%;
     max-width: 100vw;
     grid-row: 2;
     height: 100%;
-    padding: 10px;
+    padding: 8px 10px 10px;
+    background: var(--panel);
     border-right: 0;
-    border-top: 1px solid var(--line);
+    border-top: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
     border-radius: 14px 14px 0 0;
-    box-shadow: 0 -15px 35px rgba(18, 34, 31, 0.16);
+    box-shadow: 0 -12px 30px rgba(18, 34, 31, 0.12);
     z-index: 10;
+  }
+
+  .side-panel.is-collapsed {
+    overflow: hidden;
+    padding: 8px 10px;
+  }
+
+  .side-panel.is-collapsed .panel-block {
+    display: none;
+  }
+
+  .panel-collapse-toggle {
+    position: sticky;
+    top: 0;
+    z-index: 15;
+    width: 96px;
+    height: 26px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    margin: -4px auto 6px;
+    border: 0;
+    border-radius: 999px;
+    color: var(--muted);
+    background: transparent;
+    box-shadow: none;
+    cursor: ns-resize;
+    touch-action: none;
+  }
+
+  .side-panel.is-collapsed .panel-collapse-toggle {
+    margin: 8px auto 0;
+  }
+
+  .panel-collapse-toggle span {
+    width: 36px;
+    height: 4px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--muted) 38%, transparent);
+    transition: width 140ms ease, background 140ms ease, box-shadow 140ms ease;
+  }
+
+  .panel-collapse-toggle:hover span,
+  .panel-collapse-toggle:focus-visible span,
+  .workspace.panel-resizing .panel-collapse-toggle span {
+    width: 48px;
+    background: color-mix(in srgb, var(--brand) 42%, var(--muted));
+    box-shadow: 0 1px 5px rgba(15, 94, 98, 0.18);
+  }
+
+  .panel-collapse-toggle:focus-visible {
+    outline: none;
   }
 
   .panel-block {
@@ -1970,7 +3084,7 @@ button {
     width: 100vw;
     max-width: 100vw;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) auto auto;
     gap: 8px;
     overflow: hidden;
   }
@@ -1994,14 +3108,66 @@ button {
     max-width: 100%;
   }
 
+  .schedule-open-button {
+    width: 38px;
+    min-height: 38px;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .schedule-open-button span {
+    display: none;
+  }
+
   .topbar .icon-button,
   .topbar .install-button {
     width: 38px;
     min-height: 38px;
   }
 
+  .schedule-picker-grid {
+    grid-template-columns: minmax(74px, 84px) minmax(0, 1fr) 40px;
+  }
+
+  .schedule-picker-grid .tool-button {
+    width: 40px;
+  }
+
+  .schedule-panel {
+    --schedule-panel-height: min(58dvh, 520px);
+    left: 8px;
+    right: 8px;
+    bottom: 7px;
+    max-height: var(--schedule-panel-height);
+  }
+
+  .schedule-panel-card {
+    height: var(--schedule-panel-height);
+    max-height: var(--schedule-panel-height);
+  }
+
+  .schedule-panel.is-open ~ .workspace {
+    grid-template-rows: minmax(0, 1fr) 42px;
+  }
+
+  .schedule-panel .schedule-stop-nav {
+    max-height: min(22dvh, 156px);
+  }
+
+  .schedule-panel-head .icon-button.small {
+    width: 36px;
+    min-height: 36px;
+  }
+
   .workspace {
-    grid-template-rows: minmax(44vh, 1fr) minmax(300px, 48dvh);
+    --side-panel-height: minmax(300px, 48dvh);
+    --map-strip-height: 16px;
+    grid-template-rows: minmax(var(--map-strip-height), 1fr) var(--side-panel-height);
+  }
+
+  .workspace.panel-collapsed {
+    --side-panel-height: 54px;
+    grid-template-rows: minmax(0, 1fr) var(--side-panel-height);
   }
 
   .install-button span,
@@ -2042,6 +3208,17 @@ button {
     text-align: left;
   }
 
+  .schedule-stop {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .schedule-stop-times {
+    justify-content: flex-start;
+    padding-left: 36px;
+    text-align: left;
+  }
+
   .map-legend {
     top: 8px;
     bottom: auto;
@@ -2071,5 +3248,20 @@ button {
 
   #map.show-vehicle-labels .vehicle-label {
     opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 1ms !important;
+  }
+
+  .vehicle-marker.leaflet-marker-icon {
+    transition: opacity 1ms linear !important;
   }
 }

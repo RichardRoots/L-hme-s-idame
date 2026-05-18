@@ -12,7 +12,7 @@
   <link rel="preconnect" href="https://unpkg.com">
   <link rel="preconnect" href="https://tile.openstreetmap.org">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="assets/css/styles.css?v=110">
+  <link rel="stylesheet" href="assets/css/styles.css?v=139">
 </head>
 <body>
   <div class="app-shell">
@@ -24,6 +24,11 @@
           <small>Tallinn</small>
         </span>
       </a>
+
+      <button class="schedule-open-button" id="scheduleToggle" type="button" aria-expanded="false" aria-controls="schedulePanel">
+        <i data-lucide="calendar-days"></i>
+        <span>Sõiduplaanid</span>
+      </button>
 
       <div class="topbar-actions">
         <span class="status-pill" id="connectionStatus">Andmed ootavad</span>
@@ -47,8 +52,51 @@
       </div>
     </header>
 
+    <aside class="schedule-panel" id="schedulePanel" aria-hidden="true" aria-label="Sõiduplaanid">
+      <div class="schedule-panel-card">
+        <button class="schedule-panel-drag" id="schedulePanelDrag" type="button" aria-label="Muuda sõiduplaani kõrgust" aria-pressed="false" title="Lohista sõiduplaani kõrgust">
+          <span aria-hidden="true"></span>
+        </button>
+        <div class="schedule-panel-head">
+          <div>
+            <strong>Sõiduplaanid</strong>
+            <span id="scheduleSummary">-</span>
+          </div>
+          <button class="icon-button small" id="scheduleClose" type="button" title="Sulge sõiduplaan" aria-label="Sulge sõiduplaan">
+            <i data-lucide="x"></i>
+          </button>
+        </div>
+
+        <form class="schedule-form" id="scheduleForm">
+          <div class="schedule-picker-grid">
+            <label class="schedule-picker-field" for="scheduleLineSelect">
+              <span>Bussiliin</span>
+              <select id="scheduleLineSelect" name="scheduleLine" aria-label="Vali bussiliini sõiduplaan">
+                <option value="">Laen liine...</option>
+              </select>
+            </label>
+            <label class="schedule-picker-field" for="scheduleDirectionSelect">
+              <span>Suund</span>
+              <select id="scheduleDirectionSelect" name="scheduleDirection" aria-label="Vali sõiduplaani suund">
+                <option value="">Suund puudub</option>
+              </select>
+            </label>
+            <button class="tool-button" type="submit">
+              <i data-lucide="search"></i>
+              <span>Näita</span>
+            </button>
+          </div>
+        </form>
+
+        <div class="schedule-list" id="scheduleList"></div>
+      </div>
+    </aside>
+
     <main class="workspace">
       <aside class="side-panel" aria-label="Juhtpaneel">
+        <button class="panel-collapse-toggle" id="panelCollapseToggle" type="button" aria-expanded="true" aria-pressed="false" aria-label="Peida paneel" title="Lohista paneeli kõrgust">
+          <span aria-hidden="true"></span>
+        </button>
         <section class="panel-block">
           <div class="block-heading">
             <h1>Valitud bussid</h1>
@@ -153,26 +201,13 @@
 
       <section class="map-area" aria-label="Tallinna bussikaart">
         <div id="map"></div>
-        <div class="map-legend" aria-label="Kaardi leppemärgid">
-          <div class="legend-group">
-            <strong>Marsruut</strong>
-            <span><i class="legend-line route route-forward"></i>Lõunapoolne suund</span>
-            <span><i class="legend-line route route-reverse"></i>Soomepoolne suund</span>
-          </div>
-          <div class="legend-group">
-            <strong>Märgid</strong>
-            <span><i class="legend-dot stop"></i>Peatus</span>
-            <span><i class="legend-dot bus"></i>Buss</span>
-            <span><i class="legend-dot favorite"></i>Lemmik</span>
-          </div>
-        </div>
       </section>
     </main>
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
-  <script src="assets/js/static-api.js?v=110"></script>
-  <script src="assets/js/app.js?v=110" defer></script>
+  <script src="assets/js/static-api.js?v=139"></script>
+  <script src="assets/js/app.js?v=139" defer></script>
 </body>
 </html>

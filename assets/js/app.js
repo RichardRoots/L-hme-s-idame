@@ -3,6 +3,7 @@ const DEFAULT_LINES = ['18', '40', '60'];
 const DEFAULT_STOP = { id: '1297', name: 'Laikmaa', lat: 59.43614, lon: 24.75755 };
 const REFRESH_SECONDS = 10;
 const WEATHER_REFRESH_MS = 10 * 60 * 1000;
+const GPS_REFRESH_MS = 5000;
 const THEME_KEY = 'bussradar.theme';
 const ROUTE_SIDE_STYLES = {
   south: { label: 'Lõuna pool', dashArray: null, dashOffset: '0', weight: 5, mapSide: 'south', priority: 0, sharedDash: 58, sharedGap: 0 },
@@ -26,6 +27,7 @@ const state = {
   vehicleLayer: null,
   schoolLayer: null,
   stopLayer: null,
+  scheduleStopHighlightLayer: null,
   favoriteStopLayer: null,
   vehicleMarkers: new Map(),
   mapStopMarkers: new Map(),
@@ -34,23 +36,39 @@ const state = {
   lineColors: loadLineColors(),
   lineEmphasis: loadLineEmphasis(),
   selectedStop: loadStop(),
+  scheduleAvailableLines: [],
+  scheduleLine: loadScheduleLine(),
+  scheduleRoutes: [],
+  scheduleRouteIndex: 0,
+  scheduleStopIndex: 0,
+  scheduleSelectedTripKey: '',
+  scheduleRequestId: 0,
   favoriteStops: loadFavoriteStops(),
   vehicles: [],
   fleet: {},
+  fleetAliases: new Map(),
   routes: [],
   mapStops: [],
   departures: [],
+  delayScheduleRoutes: new Map(),
   schools: [],
   schoolsVisible: false,
   shouldFitVehicles: true,
   refreshCountdown: REFRESH_SECONDS,
   refreshTimer: null,
   countdownTimer: null,
+  refreshRequestId: 0,
   lastWeatherFetch: 0,
   deferredInstallPrompt: null,
   user: null,
   theme: loadTheme(),
   preferenceSaveTimer: null,
+  sidePanelHeight: 0,
+  userLocationMarker: null,
+  userLocationAccuracyCircle: null,
+  userLocationTimer: null,
+  userLocationActive: false,
+  userLocationPending: false,
 };
 
 const els = {};
@@ -83,11 +101,24 @@ function cacheElements() {
   els.themeToggle = document.querySelector('#themeToggle');
   els.accountLink = document.querySelector('#accountLink');
   els.authButtonText = document.querySelector('#authButtonText');
+  els.schedulePanel = document.querySelector('#schedulePanel');
+  els.schedulePanelDrag = document.querySelector('#schedulePanelDrag');
+  els.scheduleToggle = document.querySelector('#scheduleToggle');
+  els.scheduleClose = document.querySelector('#scheduleClose');
+  els.workspace = document.querySelector('.workspace');
+  els.sidePanel = document.querySelector('.side-panel');
+  els.panelCollapseToggle = document.querySelector('#panelCollapseToggle');
   els.stopSearchForm = document.querySelector('#stopSearchForm');
   els.stopSearch = document.querySelector('#stopSearch');
   els.stopResults = document.querySelector('#stopResults');
   els.selectedStopName = document.querySelector('#selectedStopName');
   els.departures = document.querySelector('#departures');
+  els.scheduleForm = document.querySelector('#scheduleForm');
+  els.scheduleLineSelect = document.querySelector('#scheduleLineSelect');
+  els.scheduleDirectionSelect = document.querySelector('#scheduleDirectionSelect');
+  els.scheduleSummary = document.querySelector('#scheduleSummary');
+  els.scheduleDirections = document.querySelector('#scheduleDirections');
+  els.scheduleList = document.querySelector('#scheduleList');
   els.favoriteStopForm = document.querySelector('#favoriteStopForm');
   els.favoriteStopSearch = document.querySelector('#favoriteStopSearch');
   els.favoriteStopResults = document.querySelector('#favoriteStopResults');
@@ -121,12 +152,14 @@ function createMap() {
   state.map.createPane('schoolPane');
   state.map.createPane('mapStopPane');
   state.map.createPane('stopPane');
+  state.map.createPane('scheduleStopPane');
   state.map.createPane('favoriteStopPane');
   state.map.createPane('vehiclePane');
   state.map.getPane('routePane').style.zIndex = 405;
   state.map.getPane('schoolPane').style.zIndex = 410;
   state.map.getPane('mapStopPane').style.zIndex = 500;
   state.map.getPane('stopPane').style.zIndex = 520;
+  state.map.getPane('scheduleStopPane').style.zIndex = 585;
   state.map.getPane('favoriteStopPane').style.zIndex = 560;
   state.map.getPane('vehiclePane').style.zIndex = 690;
 
@@ -134,6 +167,7 @@ function createMap() {
   state.schoolLayer = L.layerGroup().addTo(state.map);
   state.mapStopLayer = L.layerGroup().addTo(state.map);
   state.stopLayer = L.layerGroup().addTo(state.map);
+  state.scheduleStopHighlightLayer = L.layerGroup().addTo(state.map);
   state.favoriteStopLayer = L.layerGroup().addTo(state.map);
   state.vehicleLayer = L.layerGroup().addTo(state.map);
 
@@ -153,6 +187,281 @@ function createMap() {
 function updateMapDensity() {
   if (!state.map) return;
   state.map.getContainer().classList.toggle('show-vehicle-labels', state.map.getZoom() >= 14);
+}
+
+function setMobilePanelCollapsed(collapsed) {
+  els.sidePanel?.classList.toggle('is-collapsed', collapsed);
+  els.workspace?.classList.toggle('panel-collapsed', collapsed);
+
+  if (els.panelCollapseToggle) {
+    els.panelCollapseToggle.setAttribute('aria-expanded', String(!collapsed));
+    els.panelCollapseToggle.setAttribute('aria-label', collapsed ? 'Ava paneel' : 'Peida paneel');
+    els.panelCollapseToggle.title = collapsed ? 'Ava paneel' : 'Lohista paneeli kõrgust';
+    if (!els.panelCollapseToggle.querySelector('span')) {
+      els.panelCollapseToggle.innerHTML = '<span aria-hidden="true"></span>';
+    }
+  }
+
+  if (els.workspace && isMobileSidePanelLayout()) {
+    const { collapsedHeight, minOpenHeight, maxHeight } = sidePanelHeightBounds();
+    if (collapsed) {
+      const currentHeight = els.sidePanel?.getBoundingClientRect().height || 0;
+      if (currentHeight > collapsedHeight + 24) {
+        state.sidePanelHeight = Math.round(clampNumber(currentHeight, minOpenHeight, maxHeight));
+      }
+      els.workspace.style.setProperty('--side-panel-height', `${collapsedHeight}px`);
+    } else {
+      const openHeight = clampNumber(state.sidePanelHeight || minOpenHeight, minOpenHeight, maxHeight);
+      state.sidePanelHeight = openHeight;
+      els.workspace.style.setProperty('--side-panel-height', `${Math.round(openHeight)}px`);
+    }
+  } else {
+    els.workspace?.style.removeProperty('--side-panel-height');
+  }
+
+  window.setTimeout(() => state.map?.invalidateSize({ animate: false }), 220);
+}
+
+function isMobileSidePanelLayout() {
+  return window.matchMedia('(max-width: 900px)').matches;
+}
+
+function sidePanelHeightBounds() {
+  const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 720;
+  const workspaceHeight = els.workspace?.getBoundingClientRect().height || Math.max(420, viewportHeight - 60);
+  const collapsedHeight = window.matchMedia('(max-width: 520px)').matches ? 54 : 56;
+  const visibleMapStrip = window.matchMedia('(max-width: 520px)').matches ? 16 : 24;
+  const minOpenHeight = clampNumber(Math.round(viewportHeight * 0.36), 260, 360);
+  const absoluteMaxHeight = Math.max(minOpenHeight, workspaceHeight - visibleMapStrip);
+  const maxHeight = Math.max(minOpenHeight, Math.min(Math.round(workspaceHeight * 0.98), absoluteMaxHeight));
+  return { collapsedHeight, minOpenHeight, maxHeight };
+}
+
+function setSidePanelHeight(height, { allowCollapsed = false, remember = true } = {}) {
+  if (!els.workspace || !els.sidePanel) {
+    return;
+  }
+
+  if (!isMobileSidePanelLayout()) {
+    els.workspace.style.removeProperty('--side-panel-height');
+    return;
+  }
+
+  const { collapsedHeight, minOpenHeight, maxHeight } = sidePanelHeightBounds();
+  const minHeight = allowCollapsed ? collapsedHeight : minOpenHeight;
+  const nextHeight = clampNumber(Number(height), minHeight, maxHeight);
+  els.workspace.style.setProperty('--side-panel-height', `${Math.round(nextHeight)}px`);
+
+  if (remember && nextHeight > collapsedHeight + 24) {
+    state.sidePanelHeight = Math.round(nextHeight);
+  }
+
+  state.map?.invalidateSize({ animate: false });
+}
+
+function clampSidePanelHeight() {
+  if (!els.workspace || !els.sidePanel || !isMobileSidePanelLayout()) {
+    els.workspace?.style.removeProperty('--side-panel-height');
+    els.workspace?.classList.remove('panel-collapsed');
+    els.workspace?.classList.remove('panel-resizing');
+    els.sidePanel?.classList.remove('is-collapsed');
+    return;
+  }
+
+  if (els.sidePanel.classList.contains('is-collapsed')) {
+    setMobilePanelCollapsed(true);
+    return;
+  }
+
+  const currentHeight = els.sidePanel.getBoundingClientRect().height;
+  if (currentHeight > 0) {
+    setSidePanelHeight(currentHeight);
+  }
+}
+
+function startSidePanelDrag(event) {
+  if (!isMobileSidePanelLayout() || !els.sidePanel || !els.workspace) {
+    return;
+  }
+
+  event.preventDefault();
+  const pointerId = event.pointerId;
+  const startY = event.clientY;
+  const startedCollapsed = els.sidePanel.classList.contains('is-collapsed');
+  const { collapsedHeight, minOpenHeight } = sidePanelHeightBounds();
+  const measuredHeight = els.sidePanel.getBoundingClientRect().height;
+  const startHeight = startedCollapsed
+    ? collapsedHeight
+    : measuredHeight || state.sidePanelHeight || minOpenHeight;
+  let moved = false;
+  let latestHeight = startHeight;
+
+  els.workspace.classList.add('panel-resizing');
+  els.panelCollapseToggle?.setAttribute('aria-pressed', 'true');
+  try {
+    els.panelCollapseToggle?.setPointerCapture?.(pointerId);
+  } catch {
+    // Pointer capture is a convenience; window listeners still keep the drag usable.
+  }
+
+  const movePanel = (moveEvent) => {
+    if (moveEvent.pointerId !== pointerId) {
+      return;
+    }
+
+    const delta = startY - moveEvent.clientY;
+    if (Math.abs(delta) > 6) {
+      moved = true;
+    }
+
+    latestHeight = startHeight + delta;
+    if (latestHeight <= collapsedHeight + 24) {
+      els.sidePanel.classList.remove('is-collapsed');
+      els.workspace.classList.remove('panel-collapsed');
+      setSidePanelHeight(collapsedHeight, { allowCollapsed: true, remember: false });
+      return;
+    }
+
+    els.sidePanel.classList.remove('is-collapsed');
+    els.workspace.classList.remove('panel-collapsed');
+    setSidePanelHeight(latestHeight);
+  };
+
+  const stopDrag = (upEvent) => {
+    if (upEvent.pointerId !== pointerId) {
+      return;
+    }
+
+    window.removeEventListener('pointermove', movePanel);
+    window.removeEventListener('pointerup', stopDrag);
+    window.removeEventListener('pointercancel', stopDrag);
+    els.workspace?.classList.remove('panel-resizing');
+    els.panelCollapseToggle?.setAttribute('aria-pressed', 'false');
+    try {
+      els.panelCollapseToggle?.releasePointerCapture?.(pointerId);
+    } catch {
+      // It may not have been captured.
+    }
+
+    if (!moved) {
+      setMobilePanelCollapsed(!startedCollapsed);
+    } else if (latestHeight <= collapsedHeight + 30) {
+      setMobilePanelCollapsed(true);
+    } else {
+      setMobilePanelCollapsed(false);
+      setSidePanelHeight(latestHeight);
+    }
+
+    window.setTimeout(() => state.map?.invalidateSize({ animate: false }), 80);
+  };
+
+  window.addEventListener('pointermove', movePanel);
+  window.addEventListener('pointerup', stopDrag);
+  window.addEventListener('pointercancel', stopDrag);
+}
+
+function setSchedulePanelOpen(open) {
+  els.schedulePanel?.classList.toggle('is-open', open);
+  els.schedulePanel?.setAttribute('aria-hidden', String(!open));
+  els.scheduleToggle?.classList.toggle('is-active', open);
+  els.scheduleToggle?.setAttribute('aria-expanded', String(open));
+
+  if (!open) {
+    clearScheduleStopHighlight();
+  }
+
+  if (open && state.scheduleRoutes.length === 0) {
+    fetchSchedule();
+  }
+
+  window.setTimeout(() => state.map?.invalidateSize({ animate: false }), 180);
+}
+
+function isMobileScheduleLayout() {
+  return window.matchMedia('(max-width: 900px)').matches;
+}
+
+function schedulePanelHeightBounds() {
+  const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 720;
+  const minHeight = clampNumber(Math.round(viewportHeight * 0.32), 210, 320);
+  const maxHeight = Math.max(minHeight + 90, Math.min(Math.round(viewportHeight * 0.82), viewportHeight - 92));
+  return { minHeight, maxHeight };
+}
+
+function setSchedulePanelHeight(height) {
+  if (!els.schedulePanel) {
+    return;
+  }
+
+  if (!isMobileScheduleLayout()) {
+    els.schedulePanel.style.removeProperty('--schedule-panel-height');
+    return;
+  }
+
+  const { minHeight, maxHeight } = schedulePanelHeightBounds();
+  const nextHeight = clampNumber(Number(height), minHeight, maxHeight);
+  els.schedulePanel.style.setProperty('--schedule-panel-height', `${Math.round(nextHeight)}px`);
+  state.map?.invalidateSize({ animate: false });
+}
+
+function clampSchedulePanelHeight() {
+  if (!els.schedulePanel || !isMobileScheduleLayout()) {
+    els.schedulePanel?.style.removeProperty('--schedule-panel-height');
+    return;
+  }
+
+  const currentHeight = els.schedulePanel.getBoundingClientRect().height;
+  if (currentHeight > 0) {
+    setSchedulePanelHeight(currentHeight);
+  }
+}
+
+function startSchedulePanelDrag(event) {
+  if (!isMobileScheduleLayout() || !els.schedulePanel) {
+    return;
+  }
+
+  event.preventDefault();
+  const pointerId = event.pointerId;
+  const startY = event.clientY;
+  const startHeight = els.schedulePanel.getBoundingClientRect().height;
+
+  els.schedulePanel.classList.add('is-resizing');
+  els.schedulePanelDrag?.setAttribute('aria-pressed', 'true');
+  try {
+    els.schedulePanelDrag?.setPointerCapture?.(pointerId);
+  } catch {
+    // Capture can fail on older touch stacks; window listeners still handle the drag.
+  }
+
+  const movePanel = (moveEvent) => {
+    if (moveEvent.pointerId !== pointerId) {
+      return;
+    }
+    setSchedulePanelHeight(startHeight + startY - moveEvent.clientY);
+  };
+
+  const stopDrag = (upEvent) => {
+    if (upEvent.pointerId !== pointerId) {
+      return;
+    }
+
+    window.removeEventListener('pointermove', movePanel);
+    window.removeEventListener('pointerup', stopDrag);
+    window.removeEventListener('pointercancel', stopDrag);
+    els.schedulePanel?.classList.remove('is-resizing');
+    els.schedulePanelDrag?.setAttribute('aria-pressed', 'false');
+    try {
+      els.schedulePanelDrag?.releasePointerCapture?.(pointerId);
+    } catch {
+      // It may not have been captured.
+    }
+    window.setTimeout(() => state.map?.invalidateSize({ animate: false }), 80);
+  };
+
+  window.addEventListener('pointermove', movePanel);
+  window.addEventListener('pointerup', stopDrag);
+  window.addEventListener('pointercancel', stopDrag);
 }
 
 function hydrateIcons() {
@@ -175,6 +484,7 @@ function bindEvents() {
       state.selectedLines.push(value);
       saveLines();
       renderLineTags();
+      renderScheduleLineOptions();
       state.shouldFitVehicles = true;
       fetchVehicles();
       fetchRoutes();
@@ -187,16 +497,52 @@ function bindEvents() {
     refreshAll();
   });
 
+  els.scheduleToggle?.addEventListener('click', () => {
+    setSchedulePanelOpen(!els.schedulePanel?.classList.contains('is-open'));
+  });
+
+  els.scheduleClose?.addEventListener('click', () => {
+    setSchedulePanelOpen(false);
+  });
+
+  els.schedulePanelDrag?.addEventListener('pointerdown', startSchedulePanelDrag);
+
   els.locateButton.addEventListener('click', () => {
     locateUser();
   });
+
+  els.panelCollapseToggle?.addEventListener('pointerdown', startSidePanelDrag);
 
   els.stopSearchForm.addEventListener('submit', (event) => {
     event.preventDefault();
     searchStops();
   });
 
+  els.scheduleForm?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    selectScheduleLine(els.scheduleLineSelect?.value || state.scheduleLine);
+  });
+
+  els.scheduleLineSelect?.addEventListener('change', () => {
+    selectScheduleLine(els.scheduleLineSelect.value);
+  });
+
+  els.scheduleDirectionSelect?.addEventListener('change', () => {
+    state.scheduleRouteIndex = clampNumber(Number(els.scheduleDirectionSelect.value || 0), 0, Math.max(0, state.scheduleRoutes.length - 1));
+    state.scheduleStopIndex = 0;
+    state.scheduleSelectedTripKey = '';
+    clearScheduleStopHighlight();
+    renderScheduleDirections();
+    renderScheduleRoute();
+  });
+
   document.addEventListener('click', handleFavoritePopupClick);
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && els.schedulePanel?.classList.contains('is-open')) {
+      setSchedulePanelOpen(false);
+    }
+  });
 
   els.favoriteStopForm.addEventListener('submit', (event) => {
     event.preventDefault();
@@ -221,6 +567,12 @@ function bindEvents() {
     event.preventDefault();
     state.deferredInstallPrompt = event;
     els.installButton.hidden = false;
+  });
+
+  window.addEventListener('resize', () => {
+    clampSchedulePanelHeight();
+    clampSidePanelHeight();
+    window.setTimeout(() => state.map?.invalidateSize({ animate: false }), 120);
   });
 }
 
@@ -298,6 +650,7 @@ function applyUserPreferences(preferences, reload = false) {
 
   els.selectedStopName.textContent = state.selectedStop.name;
   renderLineTags();
+  renderScheduleLineOptions();
   placeStopMarker(state.selectedStop);
   renderFavoriteStops();
 
@@ -420,6 +773,9 @@ function loadInitialData() {
   els.toggleSchools.classList.toggle('muted', !state.schoolsVisible);
   placeStopMarker(state.selectedStop);
   renderFavoriteStops();
+  renderScheduleLineOptions();
+  fetchScheduleLines();
+  fetchSchedule();
   fetchRoutes();
   refreshAll();
   loadSchools();
@@ -440,15 +796,35 @@ async function loadFleetData() {
 
     const data = await response.json();
     state.fleet = data.vehicles && typeof data.vehicles === 'object' ? data.vehicles : {};
+    state.fleetAliases = buildFleetAliasIndex(state.fleet);
   } catch {
     state.fleet = {};
+    state.fleetAliases = new Map();
   }
 }
 
-function refreshAll() {
-  fetchVehicles();
-  fetchDepartures(state.selectedStop);
-  fetchWeather();
+async function refreshAll() {
+  const requestId = ++state.refreshRequestId;
+  setRefreshBusy(true);
+
+  await Promise.allSettled([
+    fetchVehicles(),
+    fetchDepartures(state.selectedStop),
+    fetchWeather(),
+  ]);
+
+  if (requestId === state.refreshRequestId) {
+    window.setTimeout(() => {
+      if (requestId === state.refreshRequestId) {
+        setRefreshBusy(false);
+      }
+    }, 180);
+  }
+}
+
+function setRefreshBusy(active) {
+  els.refreshButton?.classList.toggle('is-loading', active);
+  document.body.classList.toggle('is-live-refreshing', active);
 }
 
 function startRefreshLoop() {
@@ -491,6 +867,7 @@ async function fetchVehicles() {
   try {
     const data = await fetchJson(`api.html?${params.toString()}`);
     state.vehicles = (data.vehicles || []).filter(isVehicleCoordinate);
+    await ensureDelaySchedules(uniqueSortedLines(state.vehicles.map((vehicle) => vehicle.line)));
     renderVehicles();
     renderDelayPanel();
     els.lastUpdated.textContent = timeNow();
@@ -501,10 +878,36 @@ async function fetchVehicles() {
   }
 }
 
+async function ensureDelaySchedules(lines) {
+  const wantedLines = uniqueSortedLines(lines.map(normalizeLine).filter(Boolean));
+  const missingLines = wantedLines.filter((line) => !state.delayScheduleRoutes.has(line));
+  if (missingLines.length === 0) {
+    return;
+  }
+
+  await Promise.all(missingLines.map(async (line) => {
+    try {
+      const params = new URLSearchParams({ action: 'schedule', line });
+      const data = await fetchJson(`api.html?${params.toString()}`);
+      const routes = (data.routes || [])
+        .filter((route) => normalizeLine(String(route.line || '')) === line)
+        .filter((route) => Array.isArray(route.stops) && route.stops.length >= 2 && route.times);
+      state.delayScheduleRoutes.set(line, routes);
+    } catch {
+      state.delayScheduleRoutes.set(line, []);
+    }
+  }));
+}
+
 function renderVehicles() {
   const activeKeys = new Set();
 
   state.vehicles.forEach((vehicle) => {
+    const opacity = lineMapOpacity(vehicle.line);
+    if (opacity <= 0) {
+      return;
+    }
+
     const risk = vehicleDelayRisk(vehicle);
     const key = vehicleKey(vehicle);
     const title = `Liin ${vehicle.line}`;
@@ -520,8 +923,11 @@ function renderVehicles() {
         marker.bussRadarIconSignature = signature;
       }
       updateVehicleMarkerElement(marker, vehicle);
-      marker.setOpacity(1);
+      marker.setOpacity(opacity);
       marker.setPopupContent(popupContent);
+      if (marker.isPopupOpen?.()) {
+        window.requestAnimationFrame(hydrateIcons);
+      }
       marker.options.title = title;
       marker.getElement()?.setAttribute('title', title);
       return;
@@ -532,7 +938,7 @@ function renderVehicles() {
       pane: 'vehiclePane',
       title,
       zIndexOffset: 1000,
-      opacity: 1,
+      opacity,
     });
 
     marker.bussRadarIconSignature = signature;
@@ -548,7 +954,7 @@ function renderVehicles() {
     }
   });
 
-  els.vehicleCount.textContent = `${state.vehicles.length} kaardil`;
+  els.vehicleCount.textContent = `${activeKeys.size} kaardil`;
   renderVehicleList();
 
   if (state.vehicles.length > 0 && state.shouldFitVehicles) {
@@ -1558,7 +1964,7 @@ function renderVehicleList() {
     const age = vehicle.ageSeconds === null || vehicle.ageSeconds === undefined ? '-' : `${Math.round(vehicle.ageSeconds)} s`;
     const risk = vehicleDelayRisk(vehicle);
     const riskClass = risk.level === 'high' ? 'risk-high' : risk.level === 'medium' ? 'risk-medium' : '';
-    const riskLabel = risk.level === 'high' ? 'Kõrge risk' : risk.level === 'medium' ? 'Võimalik hilinemine' : '';
+    const riskLabel = risk.level === 'low' ? '' : risk.label;
     const profile = vehicleProfile(vehicle);
     return `
       <button class="vehicle-row ${riskClass}" type="button" data-vehicle-key="${escapeHtml(vehicleKey(vehicle))}">
@@ -1620,6 +2026,7 @@ function vehiclePopup(vehicle, risk) {
       ${fleetInfo}
       <dl>
         <dt>Sõiduk</dt><dd>${escapeHtml(vehicle.id)}</dd>
+        ${profile.model ? `<dt>Mudel</dt><dd>${escapeHtml(profile.model)}</dd>` : ''}
         <dt>Kiirus</dt><dd>${speed}</dd>
         <dt>GPS vanus</dt><dd>${age}</dd>
         <dt>Olek</dt><dd>${risk.label}</dd>
@@ -1692,6 +2099,7 @@ function stopPopupContent(stop, departures, loading = false, error = '') {
 }
 
 function selectStop(stop) {
+  clearScheduleStopHighlight();
   state.selectedStop = stop;
   saveStop(stop);
   els.selectedStopName.textContent = stop.name;
@@ -1766,6 +2174,49 @@ function placeStopMarker(stop) {
   `);
 }
 
+function showScheduleStopHighlight(stop) {
+  clearScheduleStopHighlight();
+  if (!isStopCoordinate(stop)) {
+    return;
+  }
+
+  const selectedStop = scheduleStopForSelection(stop);
+  const marker = L.marker([stop.lat, stop.lon], {
+    pane: 'scheduleStopPane',
+    icon: scheduleStopHighlightIcon(stop),
+    title: `${stop.name || 'Peatus'} - sõiduplaanist valitud`,
+    zIndexOffset: 850,
+  }).addTo(state.scheduleStopHighlightLayer);
+
+  marker.bindPopup(stopPopupContent(selectedStop, [], true), {
+    minWidth: 240,
+    maxWidth: 310,
+  });
+
+  marker.on('click', async () => {
+    await loadStopPopupDepartures(selectedStop, marker);
+  });
+}
+
+function clearScheduleStopHighlight() {
+  state.scheduleStopHighlightLayer?.clearLayers();
+}
+
+function scheduleStopHighlightIcon(stop) {
+  return L.divIcon({
+    className: 'schedule-stop-highlight-marker',
+    html: `
+      <div class="schedule-stop-highlight-pin">
+        <span aria-hidden="true"></span>
+        <strong>${escapeHtml(shortText(stop.name || 'Peatus', 18))}</strong>
+      </div>
+    `,
+    iconSize: [150, 52],
+    iconAnchor: [18, 42],
+    popupAnchor: [0, -36],
+  });
+}
+
 async function fetchDepartures(stop) {
   if (!stop || !stop.id) return;
 
@@ -1806,6 +2257,923 @@ function renderDepartures() {
       </article>
     `;
   }).join('');
+}
+
+async function fetchScheduleLines() {
+  try {
+    const data = await fetchJson('api.html?action=lines&type=bus');
+    state.scheduleAvailableLines = Array.isArray(data.lines)
+      ? data.lines.map(normalizeLine).filter(Boolean)
+      : [];
+
+    if (!state.scheduleLine && state.scheduleAvailableLines.length > 0) {
+      state.scheduleLine = state.scheduleAvailableLines[0];
+      saveScheduleLine();
+    }
+
+    renderScheduleLineOptions();
+  } catch (error) {
+    if (els.scheduleSummary) {
+      els.scheduleSummary.textContent = 'Liinid puuduvad';
+    }
+  }
+}
+
+function renderScheduleLineOptions() {
+  if (!els.scheduleLineSelect) {
+    return;
+  }
+
+  const currentLine = normalizeLine(state.scheduleLine || state.selectedLines[0] || DEFAULT_LINES[0] || '');
+  const lines = uniqueSortedLines([
+    ...state.selectedLines,
+    ...state.scheduleAvailableLines,
+    currentLine,
+  ]);
+
+  if (lines.length === 0) {
+    els.scheduleLineSelect.innerHTML = '<option value="">Liin puudub</option>';
+    els.scheduleLineSelect.value = '';
+    return;
+  }
+
+  els.scheduleLineSelect.innerHTML = lines.map((line) => {
+    const selected = line === currentLine ? ' selected' : '';
+    return `<option value="${escapeHtml(line)}"${selected}>${escapeHtml(line)}</option>`;
+  }).join('');
+  els.scheduleLineSelect.value = currentLine;
+}
+
+function selectScheduleLine(value) {
+  const line = normalizeLine(String(value || ''));
+  if (!line) {
+    return;
+  }
+
+  state.scheduleLine = line;
+  state.scheduleRouteIndex = 0;
+  state.scheduleStopIndex = 0;
+  state.scheduleSelectedTripKey = '';
+  clearScheduleStopHighlight();
+  saveScheduleLine();
+  renderScheduleLineOptions();
+  fetchSchedule();
+}
+
+async function fetchSchedule() {
+  const line = normalizeLine(state.scheduleLine || state.selectedLines[0] || DEFAULT_LINES[0] || '');
+  if (!line) {
+    renderScheduleEmpty('Vali liin');
+    return;
+  }
+
+  state.scheduleLine = line;
+  renderScheduleLineOptions();
+  const requestId = ++state.scheduleRequestId;
+
+  if (els.scheduleSummary) {
+    els.scheduleSummary.textContent = `Liin ${line}`;
+  }
+  if (els.scheduleDirections) {
+    els.scheduleDirections.innerHTML = '';
+  }
+  if (els.scheduleDirectionSelect) {
+    els.scheduleDirectionSelect.innerHTML = '<option value="">Laen suunda...</option>';
+    els.scheduleDirectionSelect.disabled = true;
+  }
+  if (els.scheduleList) {
+    els.scheduleList.innerHTML = '<div class="empty-state">Laen sõiduplaani...</div>';
+  }
+
+  const params = new URLSearchParams({ action: 'schedule', line });
+
+  try {
+    const data = await fetchJson(`api.html?${params.toString()}`);
+    if (requestId !== state.scheduleRequestId) {
+      return;
+    }
+
+    const sourceRoutes = (data.routes || [])
+      .filter((route) => normalizeLine(String(route.line || '')) === line)
+      .filter((route) => Array.isArray(route.stops) && route.stops.length >= 2)
+      .sort((a, b) => String(a.tag || '').localeCompare(String(b.tag || ''), 'et'));
+    state.scheduleRoutes = combineScheduleRoutesByDirection(sourceRoutes);
+
+    state.scheduleRouteIndex = clampNumber(state.scheduleRouteIndex, 0, Math.max(0, state.scheduleRoutes.length - 1));
+    state.scheduleStopIndex = 0;
+    state.scheduleSelectedTripKey = '';
+
+    if (state.scheduleRoutes.length === 0) {
+      renderScheduleEmpty('Sõiduplaani ei leitud');
+      return;
+    }
+
+    renderScheduleDirections();
+    renderScheduleRoute();
+  } catch (error) {
+    renderScheduleError(error.message);
+  }
+}
+
+function combineScheduleRoutesByDirection(routes) {
+  const groups = new Map();
+
+  routes.forEach((route, index) => {
+    const key = scheduleDirectionGroupKey(route, index);
+    if (!groups.has(key)) {
+      groups.set(key, []);
+    }
+    groups.get(key).push(route);
+  });
+
+  return [...groups.values()].map((group, groupIndex) => {
+    const sorted = [...group].sort((a, b) => {
+      const stopDiff = (b.stops?.length || 0) - (a.stops?.length || 0);
+      if (stopDiff) return stopDiff;
+      return String(a.name || '').localeCompare(String(b.name || ''), 'et', { numeric: true });
+    });
+    const primary = sorted[0];
+    return {
+      ...primary,
+      tag: primary.tag || `schedule-${groupIndex}`,
+      scheduleSources: sorted,
+      scheduleVariantCount: sorted.length,
+      stops: primary.stops || [],
+      points: (primary.stops || []).map((stop) => [stop.lat, stop.lon]),
+    };
+  }).sort((a, b) => scheduleDirectionSortValue(a) - scheduleDirectionSortValue(b)
+    || String(a.name || '').localeCompare(String(b.name || ''), 'et', { numeric: true }));
+}
+
+function scheduleDirectionGroupKey(route, index) {
+  const tag = String(route.tag || '').toLowerCase();
+  if (/^a.*-b/.test(tag)) return 'a-b';
+  if (/^b.*-a/.test(tag)) return 'b-a';
+
+  const stops = Array.isArray(route.stops) ? route.stops : [];
+  const first = stops[0];
+  const last = stops[stops.length - 1];
+  if (first && last) {
+    return `${normalizeScheduleText(first.name || first.stopId)}>${normalizeScheduleText(last.name || last.stopId)}`;
+  }
+
+  return `route-${index}`;
+}
+
+function scheduleDirectionSortValue(route) {
+  const tag = String(route.tag || '').toLowerCase();
+  if (/^a.*-b/.test(tag)) return 0;
+  if (/^b.*-a/.test(tag)) return 1;
+  return 2;
+}
+
+function normalizeScheduleText(value) {
+  return String(value || '')
+    .toLocaleLowerCase('et')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function renderScheduleDirections() {
+  if (els.scheduleDirectionSelect) {
+    if (state.scheduleRoutes.length === 0) {
+      els.scheduleDirectionSelect.innerHTML = '<option value="">Suund puudub</option>';
+      els.scheduleDirectionSelect.disabled = true;
+      return;
+    }
+
+    els.scheduleDirectionSelect.disabled = false;
+    els.scheduleDirectionSelect.innerHTML = state.scheduleRoutes.map((route, index) => {
+      return `<option value="${index}">${escapeHtml(scheduleDirectionTitle(route, index))} (${escapeHtml(scheduleDirectionMeta(route, index))})</option>`;
+    }).join('');
+    els.scheduleDirectionSelect.value = String(state.scheduleRouteIndex);
+  }
+
+  if (!els.scheduleDirections) {
+    return;
+  }
+
+  els.scheduleDirections.innerHTML = state.scheduleRoutes.map((route, index) => {
+    const active = index === state.scheduleRouteIndex;
+    return `
+      <button class="schedule-direction${active ? ' is-active' : ''}" type="button" data-schedule-route="${index}">
+        <span class="route-badge mini" data-line="${escapeHtml(route.line)}" style="--badge-color: ${routeColor(route.line)}">${escapeHtml(route.line)}</span>
+        <span>
+          <strong>${escapeHtml(scheduleDirectionTitle(route, index))}</strong>
+          <small>${escapeHtml(scheduleDirectionMeta(route, index))}</small>
+        </span>
+      </button>
+    `;
+  }).join('');
+
+  els.scheduleDirections.querySelectorAll('.schedule-direction').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.scheduleRouteIndex = Number(button.dataset.scheduleRoute || 0);
+      state.scheduleStopIndex = 0;
+      state.scheduleSelectedTripKey = '';
+      clearScheduleStopHighlight();
+      renderScheduleDirections();
+      state.scheduleRequestId += 1;
+      renderScheduleRoute();
+    });
+  });
+}
+
+function renderScheduleRouteLegacy(loadTimes = true, requestId = state.scheduleRequestId) {
+  const route = state.scheduleRoutes[state.scheduleRouteIndex];
+  if (!route || !els.scheduleList) {
+    renderScheduleEmpty('Sõiduplaani ei leitud');
+    return;
+  }
+
+  const stops = Array.isArray(route.stops) ? route.stops : [];
+  if (els.scheduleSummary) {
+    els.scheduleSummary.textContent = `${stops.length} peatust`;
+  }
+
+  els.scheduleList.innerHTML = `
+    <div class="schedule-route-head">
+      <span class="route-badge" data-line="${escapeHtml(route.line)}" style="--badge-color: ${routeColor(route.line)}">${escapeHtml(route.line)}</span>
+      <span>
+        <strong>${escapeHtml(scheduleDirectionTitle(route, state.scheduleRouteIndex))}</strong>
+        <small>${escapeHtml(scheduleDirectionMeta(route, state.scheduleRouteIndex))}</small>
+      </span>
+    </div>
+    <div class="schedule-stops">
+      ${stops.map((stop, index) => `
+        <article class="schedule-stop">
+          <button class="schedule-stop-focus" type="button" data-schedule-stop="${index}" title="Ava peatus kaardil">
+            <span class="schedule-stop-order">${index + 1}</span>
+            <span class="schedule-stop-main">
+              <strong>${escapeHtml(stop.name || 'Peatus')}</strong>
+              <small>${escapeHtml(stop.stopId || stop.id || '')}</small>
+            </span>
+          </button>
+          <span class="schedule-stop-times" data-schedule-time="${index}">
+            ${loadTimes ? 'Laen aegu...' : 'Ajad uuenduvad valikul'}
+          </span>
+        </article>
+      `).join('')}
+    </div>
+  `;
+
+  els.scheduleList.querySelectorAll('.schedule-stop-focus').forEach((button) => {
+    button.addEventListener('click', () => {
+      const stop = stops[Number(button.dataset.scheduleStop || 0)];
+      if (!stop) {
+        return;
+      }
+
+      selectStop(scheduleStopForSelection(stop));
+      if (isStopCoordinate(stop)) {
+        state.map.setView([stop.lat, stop.lon], Math.max(state.map.getZoom(), 15), { animate: true });
+      }
+    });
+  });
+
+  hydrateIcons();
+
+  if (loadTimes) {
+    loadScheduleDepartures(route, requestId);
+  }
+}
+
+async function loadScheduleDepartures(route, requestId) {
+  const stops = Array.isArray(route.stops) ? route.stops : [];
+  const line = normalizeLine(String(route.line || state.scheduleLine || ''));
+
+  await runWithConcurrency(stops, 4, async (stop, index) => {
+    const target = els.scheduleList?.querySelector(`[data-schedule-time="${index}"]`);
+    if (!target || requestId !== state.scheduleRequestId || !stop?.id) {
+      return;
+    }
+
+    const params = new URLSearchParams({ action: 'departures', stopid: stop.id });
+    try {
+      const data = await fetchJson(`api.html?${params.toString()}`);
+      if (requestId !== state.scheduleRequestId) {
+        return;
+      }
+
+      const departures = (data.departures || [])
+        .filter((departure) => departure.type === 'bus')
+        .filter((departure) => normalizeLine(String(departure.line || '')) === line)
+        .slice(0, 3);
+      target.innerHTML = scheduleDepartureTimesHtml(departures);
+      target.classList.toggle('is-empty', departures.length === 0);
+    } catch {
+      if (requestId === state.scheduleRequestId) {
+        target.innerHTML = '<span class="schedule-time-empty">Ajad puuduvad</span>';
+        target.classList.add('is-empty');
+      }
+    }
+  });
+}
+
+function scheduleDepartureTimesHtml(departures) {
+  if (departures.length === 0) {
+    return '<span class="schedule-time-empty">Lähiajal pole</span>';
+  }
+
+  return departures.map((departure) => {
+    const minutes = departure.minutesUntil === null || departure.minutesUntil === undefined
+      ? ''
+      : `${departure.minutesUntil} min`;
+    const label = [minutes, departure.expectedTime].filter(Boolean).join(' · ');
+    return `<span class="schedule-time-pill">${escapeHtml(label)}</span>`;
+  }).join('');
+}
+
+function scheduleDirectionTitle(route, index) {
+  const sources = Array.isArray(route.scheduleSources) && route.scheduleSources.length > 0
+    ? route.scheduleSources
+    : [route];
+  const namedSource = sources
+    .map((source) => String(source.name || '').trim())
+    .find(Boolean);
+
+  if (namedSource) {
+    return namedSource;
+  }
+
+  const stops = Array.isArray(route.stops) ? route.stops : [];
+  const firstStop = stops.find((stop) => String(stop?.name || '').trim());
+  const lastStop = [...stops].reverse().find((stop) => String(stop?.name || '').trim());
+  const firstName = String(firstStop?.name || '').trim();
+  const lastName = String(lastStop?.name || '').trim();
+  const firstNameKey = normalizeScheduleText(firstName);
+  const lastDifferentStop = firstNameKey
+    ? [...stops].reverse().find((stop) => {
+      const name = String(stop?.name || '').trim();
+      return name && normalizeScheduleText(name) !== firstNameKey;
+    })
+    : null;
+  const lastDifferentName = String(lastDifferentStop?.name || '').trim();
+
+  if (firstName && lastName && normalizeScheduleText(firstName) !== normalizeScheduleText(lastName)) {
+    return `${firstName} - ${lastName}`;
+  }
+
+  if (firstName && lastDifferentName) {
+    return `${firstName} - ${lastDifferentName}`;
+  }
+
+  if (firstName || lastName) {
+    return firstName || lastName;
+  }
+
+  return `Liin ${route.line || ''} suund ${index + 1}`.trim();
+}
+
+function scheduleDirectionMeta(route) {
+  const stops = Array.isArray(route.stops) ? route.stops.length : 0;
+  return `${stops} peatust`;
+}
+
+function scheduleStopForSelection(stop) {
+  return {
+    id: String(stop.id || stop.siriId || stop.stopId || ''),
+    stopId: String(stop.stopId || ''),
+    siriId: String(stop.siriId || ''),
+    name: String(stop.name || 'Peatus'),
+    street: String(stop.street || ''),
+    area: String(stop.area || ''),
+    city: String(stop.city || ''),
+    lat: Number(stop.lat),
+    lon: Number(stop.lon),
+  };
+}
+
+function renderScheduleEmpty(message) {
+  if (els.scheduleSummary) {
+    els.scheduleSummary.textContent = '-';
+  }
+  if (els.scheduleDirections) {
+    els.scheduleDirections.innerHTML = '';
+  }
+  if (els.scheduleDirectionSelect) {
+    els.scheduleDirectionSelect.innerHTML = '<option value="">Suund puudub</option>';
+    els.scheduleDirectionSelect.disabled = true;
+  }
+  if (els.scheduleList) {
+    els.scheduleList.innerHTML = `<div class="empty-state">${escapeHtml(message)}</div>`;
+  }
+}
+
+function renderScheduleError(message) {
+  if (els.scheduleSummary) {
+    els.scheduleSummary.textContent = 'Viga';
+  }
+  if (els.scheduleDirections) {
+    els.scheduleDirections.innerHTML = '';
+  }
+  if (els.scheduleDirectionSelect) {
+    els.scheduleDirectionSelect.innerHTML = '<option value="">Suund puudub</option>';
+    els.scheduleDirectionSelect.disabled = true;
+  }
+  if (els.scheduleList) {
+    renderInlineError(els.scheduleList, message);
+  }
+}
+
+async function runWithConcurrency(items, limit, worker) {
+  let nextIndex = 0;
+  const workerCount = Math.min(Math.max(1, limit), items.length);
+  const runners = Array.from({ length: workerCount }, async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      await worker(items[index], index);
+    }
+  });
+
+  await Promise.all(runners);
+}
+
+function renderScheduleRoute() {
+  const route = state.scheduleRoutes[state.scheduleRouteIndex];
+  if (!route || !els.scheduleList) {
+    renderScheduleEmpty('Sõiduplaani ei leitud');
+    return;
+  }
+
+  const stops = Array.isArray(route.stops) ? route.stops : [];
+  state.scheduleStopIndex = clampNumber(state.scheduleStopIndex, 0, Math.max(0, stops.length - 1));
+  const selectedStop = stops[state.scheduleStopIndex] || stops[0] || {};
+  const schedule = buildStopSchedule(route, state.scheduleStopIndex);
+  const todayDepartures = scheduleDeparturesForToday(schedule);
+  const nextDepartures = scheduleNextDepartures(todayDepartures.length ? todayDepartures : schedule.all);
+  const selectedDeparture = schedule.all.find((departure) => departure.key === state.scheduleSelectedTripKey);
+  const selectedTripStops = selectedDeparture ? scheduleTripTimelineRows(route, selectedDeparture, selectedStop) : [];
+  const stopNavEntries = selectedTripStops.length > 0
+    ? selectedTripStops.map((row) => {
+      const routeIndex = stops.findIndex((stop) => scheduleStopsMatch(stop, row.stop));
+      return {
+        stop: row.stop,
+        routeIndex,
+        timeLabel: minutesToClock(row.time),
+        isCurrent: row.isCurrent,
+      };
+    })
+    : stops.map((stop, index) => {
+      const stopSchedule = buildStopSchedule(route, index);
+      const stopTodayDepartures = scheduleDeparturesForToday(stopSchedule);
+      const next = scheduleNextDepartures(stopTodayDepartures.length ? stopTodayDepartures : stopSchedule.all, 1)[0];
+      return {
+        stop,
+        routeIndex: index,
+        timeLabel: next ? minutesToClock(next.time) : '',
+        isCurrent: index === state.scheduleStopIndex,
+      };
+    });
+
+  if (els.scheduleSummary) {
+    els.scheduleSummary.textContent = `${stops.length} peatust`;
+  }
+
+  els.scheduleList.innerHTML = `
+    <div class="schedule-board">
+      <div class="schedule-stop-nav${selectedDeparture ? ' has-trip-times' : ''}" aria-label="Marsruudi peatused">
+        ${selectedDeparture ? `
+          <div class="schedule-stop-nav-head">
+            <strong>Väljumine ${escapeHtml(minutesToClock(selectedDeparture.time))}</strong>
+            <small>${escapeHtml(scheduleDirectionTitle(route, state.scheduleRouteIndex))}</small>
+          </div>
+        ` : ''}
+        ${stopNavEntries.map((entry, index) => {
+          const active = entry.isCurrent || entry.routeIndex === state.scheduleStopIndex;
+          return `
+            <button class="schedule-stop-link${active ? ' is-active' : ''}" type="button" data-schedule-display-stop="${index}">
+              <span>${escapeHtml(entry.timeLabel)}</span>
+              <strong>${escapeHtml(entry.stop.name || 'Peatus')}</strong>
+            </button>
+          `;
+        }).join('')}
+      </div>
+
+      <div class="schedule-detail">
+        <div class="schedule-route-head">
+          <span class="route-badge" data-line="${escapeHtml(route.line)}" style="--badge-color: ${routeColor(route.line)}">${escapeHtml(route.line)}</span>
+          <span>
+            <small>${escapeHtml(scheduleDirectionTitle(route, state.scheduleRouteIndex))}</small>
+            <strong>${escapeHtml(selectedStop.name || 'Peatus')}</strong>
+            <em>${escapeHtml(scheduleRouteStreets(route))}</em>
+          </span>
+        </div>
+
+        <div class="schedule-next">
+          <span><i data-lucide="clock-3"></i> Järgmised väljumised</span>
+          <div>
+            ${nextDepartures.length ? nextDepartures.map((departure) => `
+              <strong><span class="route-badge mini" data-line="${escapeHtml(route.line)}" style="--badge-color: ${routeColor(route.line)}">${escapeHtml(route.line)}</span>${escapeHtml(departure.waitLabel)}</strong>
+            `).join('') : '<small>Lähiajal väljumisi ei leitud</small>'}
+          </div>
+        </div>
+
+        <div class="schedule-timetable-grid">
+          ${renderScheduleTable('weekday', 'Tööpäev', schedule.groups.weekday)}
+          ${renderScheduleTable('saturday', 'Laupäev', schedule.groups.saturday)}
+          ${renderScheduleTable('sunday', 'Pühapäev ja riiklik püha', schedule.groups.sunday)}
+        </div>
+
+        <div class="schedule-info">
+          <strong>Vedaja:</strong> ${escapeHtml(route.operator || 'Tallinna Linnatranspordi AS')}
+        </div>
+      </div>
+    </div>
+  `;
+
+  els.scheduleList.querySelectorAll('.schedule-stop-link').forEach((button) => {
+    button.addEventListener('click', () => {
+      const entry = stopNavEntries[Number(button.dataset.scheduleDisplayStop || 0)];
+      const stop = entry?.stop;
+      if (!stop) {
+        return;
+      }
+
+      if (entry.routeIndex >= 0) {
+        state.scheduleStopIndex = entry.routeIndex;
+      }
+      selectStop(scheduleStopForSelection(stop));
+      showScheduleStopHighlight(stop);
+      if (isStopCoordinate(stop)) {
+        state.map.setView([stop.lat, stop.lon], Math.max(state.map.getZoom(), 15), { animate: true });
+      }
+      renderScheduleRoute();
+    });
+  });
+
+  els.scheduleList.querySelectorAll('.schedule-time-button').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.scheduleSelectedTripKey = button.dataset.scheduleTrip || '';
+      renderScheduleRoute();
+      window.setTimeout(() => {
+        els.scheduleList?.querySelector('.schedule-trip-detail')?.scrollIntoView({ block: 'nearest' });
+      }, 0);
+    });
+  });
+
+  hydrateIcons();
+}
+
+function renderScheduleTable(key, title, departures) {
+  const rows = scheduleHourRows(departures);
+  return `
+    <table class="schedule-table schedule-${escapeHtml(key)}">
+      <thead>
+        <tr>
+          <th></th>
+          <th>${escapeHtml(title)}</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.length ? rows.map((row) => `
+          <tr>
+            <th>${escapeHtml(row.hourLabel)}</th>
+            <td>${row.items.map((item) => `
+              <button class="schedule-time-button${item.isNext ? ' is-next' : ''}${item.key === state.scheduleSelectedTripKey ? ' is-selected' : ''}" type="button" data-schedule-trip="${escapeHtml(item.key)}" title="Näita selle väljumise peatuseid">
+                ${escapeHtml(item.minuteLabel)}
+              </button>
+            `).join('')}</td>
+          </tr>
+        `).join('') : '<tr><th>-</th><td><small>Väljumisi ei ole</small></td></tr>'}
+      </tbody>
+    </table>
+  `;
+}
+
+function scheduleTripTimelineRows(route, departure, selectedStop) {
+  const sources = Array.isArray(route.scheduleSources) && route.scheduleSources.length > 0
+    ? route.scheduleSources
+    : [route];
+  const source = sources[departure.sourceIndex] || route;
+  const stops = Array.isArray(source.stops) ? source.stops : [];
+  const exploded = source._scheduleExploded || (source._scheduleExploded = explodeRouteTimes(source.times || ''));
+  const tripCount = exploded.workdays.length;
+
+  return stops.map((stop, index) => {
+    const time = exploded.times[index * tripCount + departure.tripIndex];
+    const isCurrent = scheduleStopsMatch(stop, selectedStop);
+    return { stop, time, isCurrent };
+  }).filter((row) => Number.isFinite(row.time) && row.time >= 0);
+}
+
+function renderScheduleTripTimeline(route, departure, selectedStop) {
+  const rows = scheduleTripTimelineRows(route, departure, selectedStop).map((row) => {
+    return `
+      <div class="schedule-trip-stop${row.isCurrent ? ' is-current' : ''}">
+        <time>${escapeHtml(minutesToClock(row.time))}</time>
+        <span class="schedule-trip-dot" aria-hidden="true"></span>
+        <strong>${escapeHtml(row.stop.name || 'Peatus')}</strong>
+      </div>
+    `;
+  }).join('');
+
+  const sources = Array.isArray(route.scheduleSources) && route.scheduleSources.length > 0
+    ? route.scheduleSources
+    : [route];
+  const source = sources[departure.sourceIndex] || route;
+
+  return `
+    <section class="schedule-trip-detail" aria-label="Valitud väljumise peatused">
+      <div class="schedule-trip-head">
+        <span class="route-badge mini" data-line="${escapeHtml(route.line)}" style="--badge-color: ${routeColor(route.line)}">${escapeHtml(route.line)}</span>
+        <span>
+          <strong>Väljumine ${escapeHtml(minutesToClock(departure.time))}</strong>
+          <small>${escapeHtml(source.name || scheduleDirectionTitle(route, state.scheduleRouteIndex))}</small>
+        </span>
+      </div>
+      <div class="schedule-trip-timeline">
+        ${rows || '<div class="empty-state">Selle väljumise peatuseid ei leitud</div>'}
+      </div>
+    </section>
+  `;
+}
+
+function buildStopSchedule(route, stopIndex) {
+  const groups = {
+    weekday: [],
+    saturday: [],
+    sunday: [],
+  };
+  const all = [];
+  const routeStops = Array.isArray(route.stops) ? route.stops : [];
+  const selectedStop = routeStops[stopIndex];
+
+  if (!selectedStop || stopIndex < 0 || stopIndex >= routeStops.length) {
+    return { groups, all };
+  }
+
+  const sources = Array.isArray(route.scheduleSources) && route.scheduleSources.length > 0
+    ? route.scheduleSources
+    : [route];
+  const seenDepartures = new Set();
+  const serviceDay = currentScheduleDateNumber();
+
+  sources.forEach((source, sourceIndex) => {
+    const sourceStops = Array.isArray(source.stops) ? source.stops : [];
+    const sourceStopIndex = sourceStops.findIndex((stop) => scheduleStopsMatch(stop, selectedStop));
+    if (sourceStopIndex < 0) {
+      return;
+    }
+
+    const exploded = source._scheduleExploded || (source._scheduleExploded = explodeRouteTimes(source.times || ''));
+    const tripCount = exploded.workdays.length;
+    if (!tripCount) {
+      return;
+    }
+
+    for (let tripIndex = 0; tripIndex < tripCount; tripIndex += 1) {
+      const time = exploded.times[sourceStopIndex * tripCount + tripIndex];
+      if (!Number.isFinite(time) || time < 0) {
+        continue;
+      }
+
+      const workdays = String(exploded.workdays[tripIndex] || '');
+      const validFrom = Number(exploded.validFrom[tripIndex] || 0);
+      const validTo = Number(exploded.validTo[tripIndex] || 0);
+      if ((validFrom && validFrom > serviceDay) || (validTo && validTo < serviceDay)) {
+        continue;
+      }
+
+      const departureKey = `${time}:${workdays}:${source.tag || sourceIndex}:${tripIndex}`;
+      if (seenDepartures.has(departureKey)) {
+        continue;
+      }
+      seenDepartures.add(departureKey);
+
+      const item = {
+        key: departureKey,
+        time,
+        tripIndex,
+        sourceIndex,
+        tag: exploded.tag[tripIndex] || '',
+        workdays,
+      };
+      all.push(item);
+
+      if (/[1-5]/.test(workdays)) {
+        groups.weekday.push(item);
+      }
+      if (workdays.includes('6')) {
+        groups.saturday.push(item);
+      }
+      if (workdays.includes('7')) {
+        groups.sunday.push(item);
+      }
+    }
+  });
+
+  Object.values(groups).forEach((items) => items.sort((a, b) => a.time - b.time || a.tripIndex - b.tripIndex));
+  all.sort((a, b) => a.time - b.time || a.tripIndex - b.tripIndex);
+
+  const todayDepartures = scheduleDeparturesForToday({ groups, all });
+  const next = new Set(scheduleNextDepartures(todayDepartures.length ? todayDepartures : all).map((item) => item.key));
+  Object.values(groups).forEach((items) => {
+    items.forEach((item) => {
+      item.isNext = next.has(item.key);
+    });
+  });
+
+  return { groups, all };
+}
+
+function scheduleStopsMatch(a, b) {
+  if (!a || !b) {
+    return false;
+  }
+
+  const aKeys = [a.stopId, a.id, a.siriId].map((value) => String(value || '')).filter(Boolean);
+  const bKeys = [b.stopId, b.id, b.siriId].map((value) => String(value || '')).filter(Boolean);
+  if (aKeys.some((key) => bKeys.includes(key))) {
+    return true;
+  }
+
+  return normalizeScheduleText(a.name) === normalizeScheduleText(b.name)
+    && Math.abs(Number(a.lat) - Number(b.lat)) < 0.00008
+    && Math.abs(Number(a.lon) - Number(b.lon)) < 0.00008;
+}
+
+function explodeRouteTimes(raw) {
+  const parts = String(raw || '').split(',');
+  const times = [];
+  const workdays = [];
+  const validFrom = [];
+  const validTo = [];
+  const tagByTrip = [];
+  let index = -1;
+  let tripCount = 0;
+  let running = 0;
+
+  while (++index < parts.length) {
+    const value = parts[index];
+    if (value === '') {
+      break;
+    }
+
+    const first = value.charAt(0);
+    if (first === '+') {
+      tagByTrip[index] = value.charAt(1) === '0' && value !== '+0' ? '2' : '1';
+    } else if (first === '-' && value.charAt(1) === '0') {
+      tagByTrip[index] = value.charAt(2) === '0' ? '2' : '1';
+    }
+
+    running += Number(value);
+    times[tripCount] = running;
+    tripCount += 1;
+  }
+
+  for (let tagIndex = tagByTrip.length - 1; tagIndex >= 0; tagIndex -= 1) {
+    if (!tagByTrip[tagIndex]) {
+      tagByTrip[tagIndex] = '0';
+    }
+  }
+
+  const cursor = { index };
+  fillRepeatedScheduleValues(parts, cursor, tripCount, validFrom);
+  cursor.index -= 1;
+  fillRepeatedScheduleValues(parts, cursor, tripCount, validTo);
+  cursor.index -= 1;
+  fillRepeatedScheduleValues(parts, cursor, tripCount, workdays, true);
+
+  index = cursor.index - 1;
+  let totalTrips = tripCount;
+  let cycleStart = 5;
+  let writeIndex = tripCount;
+  while (++index < parts.length) {
+    cycleStart += Number(parts[index]) - 5;
+    let repeat = parts[++index];
+    if (repeat !== '' && Number(repeat) <= totalTrips) {
+      repeat = Number(repeat);
+      totalTrips -= repeat;
+    } else {
+      repeat = totalTrips;
+      totalTrips = 0;
+    }
+
+    while (repeat > 0) {
+      times[writeIndex] = cycleStart + times[writeIndex - tripCount];
+      writeIndex += 1;
+      repeat -= 1;
+    }
+
+    if (totalTrips <= 0) {
+      totalTrips = tripCount;
+      cycleStart = 5;
+    }
+  }
+
+  return {
+    workdays,
+    times,
+    validFrom,
+    validTo,
+    tag: tagByTrip.join(''),
+  };
+}
+
+function fillRepeatedScheduleValues(parts, cursor, tripCount, target, keepString = false) {
+  let writeIndex = 0;
+  while (++cursor.index < parts.length) {
+    const value = parts[cursor.index];
+    const rawCount = parts[++cursor.index];
+    let count;
+    if (rawCount === '') {
+      count = tripCount - writeIndex;
+    } else {
+      count = Number(rawCount);
+    }
+
+    while (count > 0) {
+      target[writeIndex] = keepString ? value : Number(value);
+      writeIndex += 1;
+      count -= 1;
+    }
+
+    if (rawCount === '') {
+      cursor.index += 1;
+      break;
+    }
+  }
+}
+
+function scheduleDeparturesForToday(schedule) {
+  const day = new Date().getDay();
+  if (day === 0) {
+    return schedule.groups.sunday || [];
+  }
+  if (day === 6) {
+    return schedule.groups.saturday || [];
+  }
+
+  return schedule.groups.weekday || [];
+}
+
+function currentScheduleDateNumber(date = new Date()) {
+  return Math.floor(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / 86400000);
+}
+
+function scheduleNextDepartures(departures, limit = 2) {
+  const now = new Date();
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  return departures
+    .map((departure) => {
+      const dayTime = positiveModulo(departure.time, 1440);
+      const wait = dayTime >= nowMinutes ? dayTime - nowMinutes : dayTime + 1440 - nowMinutes;
+      return {
+        ...departure,
+        wait,
+        waitLabel: wait < 60 ? `${wait} min` : minutesToClock(departure.time),
+      };
+    })
+    .sort((a, b) => a.wait - b.wait || a.tripIndex - b.tripIndex)
+    .slice(0, limit);
+}
+
+function scheduleHourRows(departures) {
+  const rows = new Map();
+  departures.forEach((departure) => {
+    const hour = Math.floor(positiveModulo(departure.time, 1440) / 60);
+    const minute = positiveModulo(departure.time, 60);
+    if (!rows.has(hour)) {
+      rows.set(hour, []);
+    }
+    rows.get(hour).push({
+      key: departure.key,
+      minuteLabel: String(minute).padStart(2, '0'),
+      isNext: departure.isNext,
+    });
+  });
+
+  return [...rows.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([hour, items]) => ({
+      hourLabel: String(hour),
+      items,
+    }));
+}
+
+function scheduleRouteStreets(route) {
+  const streets = String(route.streets || '')
+    .split(',')
+    .map((street) => street.trim())
+    .filter(Boolean);
+  if (streets.length > 0) {
+    return `Marsruut: ${streets.slice(0, 8).join(', ')}${streets.length > 8 ? '...' : ''}`;
+  }
+
+  return `Marsruut: ${route.stops?.map((stop) => stop.name).filter(Boolean).slice(0, 4).join(' - ') || scheduleDirectionTitle(route, 0)}`;
+}
+
+function minutesToClock(minutes) {
+  const normalized = positiveModulo(minutes, 1440);
+  const hour = Math.floor(normalized / 60);
+  const minute = normalized % 60;
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+}
+
+function positiveModulo(value, divisor) {
+  return ((Number(value) % divisor) + divisor) % divisor;
 }
 
 async function loadSchools() {
@@ -1951,24 +3319,6 @@ function nearestStopToSchool(school) {
   return bestDistance <= 1200 ? best : null;
 }
 
-function nearbySchoolCrowd(lat, lon) {
-  let best = null;
-
-  state.schools.forEach((school) => {
-    const crowd = schoolCrowdLevel(school);
-    if (crowd.level === 0) {
-      return;
-    }
-
-    const distance = distanceMeters(lat, lon, school.lat, school.lon);
-    if (distance <= 750 && (!best || crowd.level > best.crowd.level || distance < best.distance)) {
-      best = { school, crowd, distance };
-    }
-  });
-
-  return best;
-}
-
 function distanceMeters(latA, lonA, latB, lonB) {
   const earthRadius = 6371000;
   const toRad = (value) => value * Math.PI / 180;
@@ -2058,13 +3408,13 @@ function renderDelayPanel() {
     + lateDepartures.filter((departure) => departure.delaySeconds >= 300).length;
 
   els.delaySummary.textContent = highCount > 0
-    ? `${highCount} kõrge risk`
-    : `${lateDepartures.length + riskyVehicles.length} märget`;
+    ? `${highCount} hilinemist`
+    : `${lateDepartures.length + riskyVehicles.length} teadet`;
 
   const departureHtml = lateDepartures.slice(0, 3).map((departure) => `
     <article class="delay-item high">
       <strong>${escapeHtml(departure.line)} · +${Math.round(departure.delaySeconds / 60)} min</strong>
-      <span>${escapeHtml(departure.destination)} · peatuse tablool juba hilineb</span>
+      <span>${escapeHtml(departure.destination)} · eeldatav aeg on plaanist hilisem</span>
       <i class="risk-meter" style="--risk:${Math.min(100, Math.round(departure.delaySeconds / 4))}%"></i>
     </article>
   `).join('');
@@ -2081,52 +3431,241 @@ function renderDelayPanel() {
 }
 
 function vehicleDelayRisk(vehicle) {
-  const age = Number(vehicle.ageSeconds || 0);
-  const speed = Number(vehicle.speed || 0);
-  const hour = new Date().getHours();
-  const rushHour = (hour >= 7 && hour <= 9) || (hour >= 16 && hour <= 18);
-  const inCenter = vehicle.lat > 59.425 && vehicle.lat < 59.455 && vehicle.lon > 24.72 && vehicle.lon < 24.79;
-  const schoolCrowd = nearbySchoolCrowd(vehicle.lat, vehicle.lon);
-  let score = 0;
-  const reasons = [];
-
-  if (age >= 180) {
-    score += 4;
-    reasons.push('GPS signaal väga vana');
-  } else if (age >= 90) {
-    score += 2;
-    reasons.push('GPS signaal aegub');
+  const estimate = vehicleScheduleDelay(vehicle);
+  if (!estimate) {
+    return {
+      level: 'low',
+      score: 1,
+      label: 'Sõiduplaani järgi hilinemist ei kinnitatud',
+      detail: '',
+    };
   }
 
-  if (rushHour && inCenter) {
-    score += 2;
-    reasons.push('kesklinna tipptund');
+  const minutes = Math.round(estimate.delayMinutes);
+  const detail = `${estimate.stopName} pidi olema ${minutesToClock(estimate.scheduledTime)} · GPS ${estimate.gpsAgeLabel}`;
+
+  if (minutes >= 5) {
+    return {
+      level: 'high',
+      score: 5,
+      label: `Suur hilinemine +${minutes} min`,
+      detail,
+    };
   }
 
-  if (speed > 0 && speed < 8 && rushHour) {
-    score += 2;
-    reasons.push('aeglane liikumine');
+  if (minutes >= 2) {
+    return {
+      level: 'medium',
+      score: 3,
+      label: `Hilinemine +${minutes} min`,
+      detail,
+    };
   }
 
-  if (schoolCrowd) {
-    score += schoolCrowd.crowd.level;
-    reasons.push(`õpilasvoog ${schoolCrowd.school.name}`);
+  return {
+    level: 'low',
+    score: 1,
+    label: minutes <= -2 ? `Graafikust ees ${Math.abs(minutes)} min` : 'Graafikus',
+    detail,
+  };
+}
+
+function vehicleScheduleDelay(vehicle) {
+  const line = normalizeLine(vehicle.line || '');
+  const routes = state.delayScheduleRoutes.get(line) || [];
+  const gpsAge = Number(vehicle.ageSeconds || 0);
+  if (routes.length === 0 || gpsAge > 180) {
+    return null;
   }
 
-  if (score >= 4) {
-    return { level: 'high', score: Math.min(5, score), label: 'Suur hilinemise oht', detail: reasons.join(', ') };
+  const destination = normalizeScheduleText(vehicle.destination || '');
+  const candidates = routes
+    .map((route) => {
+      const position = vehicleRouteSchedulePosition(route, vehicle);
+      if (!position) {
+        return null;
+      }
+
+      const destinationScore = scheduleDestinationMatchScore(route, destination);
+      const delay = scheduleDelayAtPosition(route, position);
+      if (!delay) {
+        return null;
+      }
+
+      const bearingPenalty = Number.isFinite(Number(vehicle.bearing)) && Number.isFinite(position.heading)
+        ? Math.min(160, bearingDifference(Number(vehicle.bearing), position.heading)) * 2
+        : 0;
+
+      return {
+        ...delay,
+        route,
+        position,
+        destinationScore,
+        matchScore: position.distanceMeters + bearingPenalty - destinationScore * 900,
+        gpsAgeLabel: `${Math.round(gpsAge)} s`,
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.matchScore - b.matchScore || Math.abs(a.delayMinutes) - Math.abs(b.delayMinutes));
+
+  const best = candidates[0];
+  if (!best || best.position.distanceMeters > 650 || (best.destinationScore === 0 && best.position.distanceMeters > 260)) {
+    return null;
   }
 
-  if (score >= 2) {
-    return { level: 'medium', score: Math.min(5, score), label: 'Võimalik hilinemine', detail: reasons.join(', ') };
+  return best;
+}
+
+function scheduleDelayAtPosition(route, position) {
+  const exploded = route._scheduleExploded || (route._scheduleExploded = explodeRouteTimes(route.times || ''));
+  const tripCount = exploded.workdays.length;
+  const nowMinutes = currentMinutesOfDay();
+  const serviceDay = currentScheduleDateNumber();
+  const todayCode = scheduleTodayCode();
+  const stopIndex = Number.isFinite(position.controlStopIndex) ? position.controlStopIndex : position.stopIndex + 1;
+  const stop = Array.isArray(route.stops) ? route.stops[stopIndex] : null;
+  let best = null;
+
+  if (!tripCount || stopIndex < 0) {
+    return null;
   }
 
-  return { level: 'low', score: 1, label: 'Tavaline liikumine', detail: '' };
+  for (let tripIndex = 0; tripIndex < tripCount; tripIndex += 1) {
+    if (!isScheduleTripActive(exploded, tripIndex, serviceDay, todayCode)) {
+      continue;
+    }
+
+    const scheduledTime = exploded.times[stopIndex * tripCount + tripIndex];
+    if (!Number.isFinite(scheduledTime)) {
+      continue;
+    }
+
+    const delayMinutes = closestScheduleDifference(nowMinutes, scheduledTime);
+
+    if (Math.abs(delayMinutes) > 45) {
+      continue;
+    }
+
+    if (!best || Math.abs(delayMinutes) < Math.abs(best.delayMinutes)) {
+      best = {
+        delayMinutes,
+        scheduledTime,
+        stopName: stop?.name || position.stopName || 'järgmine peatus',
+        tripIndex,
+      };
+    }
+  }
+
+  return best;
+}
+
+function vehicleRouteSchedulePosition(route, vehicle) {
+  const stops = Array.isArray(route.stops) ? route.stops : [];
+  if (stops.length < 2) {
+    return null;
+  }
+
+  let best = null;
+  for (let index = 0; index < stops.length - 1; index += 1) {
+    const start = stops[index];
+    const end = stops[index + 1];
+    if (!isStopCoordinate(start) || !isStopCoordinate(end)) {
+      continue;
+    }
+
+    const projection = projectPointToStopSegment(vehicle.lat, vehicle.lon, start, end);
+    if (!best || projection.distanceMeters < best.distanceMeters) {
+      const controlStopIndex = projection.ratio < 0.18 ? index : index + 1;
+      const controlStop = projection.ratio < 0.18 ? start : end;
+      best = {
+        stopIndex: index,
+        controlStopIndex,
+        ratio: projection.ratio,
+        distanceMeters: projection.distanceMeters,
+        heading: routeStopHeading(start, end),
+        stopName: controlStop.name || 'peatus',
+      };
+    }
+  }
+
+  return best;
+}
+
+function projectPointToStopSegment(lat, lon, start, end) {
+  const midLat = (Number(start.lat) + Number(end.lat) + Number(lat)) / 3;
+  const metersPerLon = Math.max(25000, 111320 * Math.cos(midLat * Math.PI / 180));
+  const bx = (Number(end.lon) - Number(start.lon)) * metersPerLon;
+  const by = (Number(end.lat) - Number(start.lat)) * 111320;
+  const px = (Number(lon) - Number(start.lon)) * metersPerLon;
+  const py = (Number(lat) - Number(start.lat)) * 111320;
+  const lengthSquared = bx * bx + by * by;
+  const ratio = clampNumber(lengthSquared ? (px * bx + py * by) / lengthSquared : 0, 0, 1);
+  const dx = px - bx * ratio;
+  const dy = py - by * ratio;
+
+  return {
+    ratio,
+    distanceMeters: Math.hypot(dx, dy),
+  };
+}
+
+function scheduleDestinationMatchScore(route, destination) {
+  if (!destination) {
+    return 0;
+  }
+
+  const stops = Array.isArray(route.stops) ? route.stops : [];
+  const lastStop = normalizeScheduleText(stops[stops.length - 1]?.name || '');
+  const routeName = normalizeScheduleText(route.name || '');
+
+  if (lastStop && lastStop === destination) return 5;
+  if (lastStop && (lastStop.includes(destination) || destination.includes(lastStop))) return 4;
+  if (routeName.endsWith(destination)) return 3;
+  if (routeName.includes(destination)) return 2;
+  return 0;
+}
+
+function isScheduleTripActive(exploded, tripIndex, serviceDay, todayCode) {
+  const workdays = String(exploded.workdays[tripIndex] || '');
+  const validFrom = Number(exploded.validFrom[tripIndex] || 0);
+  const validTo = Number(exploded.validTo[tripIndex] || 0);
+
+  return workdays.includes(todayCode)
+    && (!validFrom || validFrom <= serviceDay)
+    && (!validTo || validTo >= serviceDay);
+}
+
+function currentMinutesOfDay(date = new Date()) {
+  return date.getHours() * 60 + date.getMinutes() + date.getSeconds() / 60;
+}
+
+function scheduleTodayCode(date = new Date()) {
+  const day = date.getDay();
+  return day === 0 ? '7' : String(day);
+}
+
+function closestScheduleDifference(nowMinutes, scheduledTime) {
+  const options = [scheduledTime, scheduledTime - 1440, scheduledTime + 1440];
+  return options
+    .map((time) => nowMinutes - time)
+    .sort((a, b) => Math.abs(a) - Math.abs(b))[0];
+}
+
+function routeStopHeading(start, end) {
+  const lat = (Number(start.lat) + Number(end.lat)) / 2;
+  const metersPerLon = Math.max(25000, 111320 * Math.cos(lat * Math.PI / 180));
+  const dx = (Number(end.lon) - Number(start.lon)) * metersPerLon;
+  const dy = (Number(end.lat) - Number(start.lat)) * 111320;
+  return (Math.atan2(dx, dy) * 180 / Math.PI + 360) % 360;
+}
+
+function bearingDifference(a, b) {
+  const diff = Math.abs(Number(a) - Number(b)) % 360;
+  return Math.min(diff, 360 - diff);
 }
 
 function vehicleProfile(vehicle) {
-  const id = String(vehicle.id || '').trim();
-  const fleet = state.fleet[id];
+  const fleet = findVehicleFleetRecord(vehicle);
 
   if (!fleet) {
     return {
@@ -2139,8 +3678,10 @@ function vehicleProfile(vehicle) {
     };
   }
 
-  const isElectric = fleet.power === 'electric' || fleet.isElectric === true;
-  const isArticulated = fleet.size === 'articulated' || fleet.isArticulated === true;
+  const power = vehiclePowerKind(fleet);
+  const size = vehicleSizeKind(fleet);
+  const isElectric = power === 'electric';
+  const isArticulated = size === 'articulated';
   const sizeLabel = vehicleSizeLabel(fleet);
   const powerLabel = vehiclePowerLabel(fleet);
   const facts = vehicleFacts(fleet, sizeLabel, powerLabel);
@@ -2153,8 +3694,83 @@ function vehicleProfile(vehicle) {
     shortLabel: facts.length ? facts.slice(0, 2).map((fact) => fact.label).join(' · ') : 'Info puudub',
     sizeLabel,
     powerLabel,
+    model: fleet.model || '',
+    power,
+    size,
     facts,
   };
+}
+
+function findVehicleFleetRecord(vehicle) {
+  const aliases = vehicleIdAliases(vehicle?.id);
+
+  for (const alias of aliases) {
+    if (state.fleet[alias]) {
+      return state.fleet[alias];
+    }
+  }
+
+  for (const alias of aliases) {
+    const fleet = state.fleetAliases.get(alias);
+    if (fleet) {
+      return fleet;
+    }
+  }
+
+  return null;
+}
+
+function buildFleetAliasIndex(fleet) {
+  const buckets = new Map();
+
+  Object.values(fleet || {}).forEach((item) => {
+    const aliases = new Set([
+      ...vehicleIdAliases(item.id),
+      ...vehicleIdAliases(registrationNumberPart(item.registration)),
+      ...vehicleIdAliases(String(item.id || '').slice(-3)),
+    ]);
+
+    aliases.forEach((alias) => {
+      if (!alias) return;
+      if (!buckets.has(alias)) {
+        buckets.set(alias, new Set());
+      }
+      buckets.get(alias).add(String(item.id || '').trim());
+    });
+  });
+
+  const index = new Map();
+  buckets.forEach((ids, alias) => {
+    if (ids.size !== 1) {
+      return;
+    }
+
+    const [id] = [...ids];
+    if (fleet[id]) {
+      index.set(alias, fleet[id]);
+    }
+  });
+
+  return index;
+}
+
+function vehicleIdAliases(value) {
+  const digits = String(value || '').replace(/\D+/g, '');
+  if (!digits) {
+    return [];
+  }
+
+  const aliases = new Set([digits, digits.replace(/^0+/, '') || '0']);
+  if (digits.length <= 3) {
+    aliases.add(digits.padStart(3, '0'));
+  }
+
+  return [...aliases].filter(Boolean);
+}
+
+function registrationNumberPart(registration) {
+  const match = String(registration || '').match(/\d+/);
+  return match ? match[0] : '';
 }
 
 function vehicleTypeBadge(fleet, isElectric, isArticulated) {
@@ -2178,11 +3794,12 @@ function vehicleTypeClass(profile) {
 }
 
 function vehicleSizeLabel(fleet) {
-  if (fleet.size === 'articulated') {
+  const size = vehicleSizeKind(fleet);
+  if (size === 'articulated') {
     return 'Pikk buss';
   }
 
-  if (fleet.size === 'standard') {
+  if (size === 'standard') {
     return 'Lühike buss';
   }
 
@@ -2190,23 +3807,84 @@ function vehicleSizeLabel(fleet) {
 }
 
 function vehiclePowerLabel(fleet) {
-  if (fleet.power === 'electric') {
+  const power = vehiclePowerKind(fleet);
+  if (power === 'electric') {
     return 'Elektriga';
   }
 
-  if (fleet.power === 'hybrid') {
+  if (power === 'hybrid') {
     return 'Hübriid';
   }
 
-  if (fleet.power === 'cng') {
+  if (power === 'cng') {
     return 'Gaasiga';
   }
 
-  if (fleet.power === 'diesel') {
+  if (power === 'diesel') {
     return 'Kütusega';
   }
 
   return '';
+}
+
+function vehicleSizeKind(fleet) {
+  if (fleet?.size === 'articulated' || fleet?.isArticulated === true) {
+    return 'articulated';
+  }
+
+  if (fleet?.size === 'standard') {
+    return 'standard';
+  }
+
+  const length = Number(fleet?.lengthMeters);
+  if (Number.isFinite(length)) {
+    return length >= 14 ? 'articulated' : 'standard';
+  }
+
+  const model = vehicleModelNeedle(fleet);
+  if (/\b(18|18m|a40|6x2|ng323|ng313)\b|liigend|articulated| lion'?s city gl /.test(model)) {
+    return 'articulated';
+  }
+
+  if (/\b(12|12m|12\.|a78|a21|nl283|el293|7900|procity)\b|urbino iv 12|urbino 12|irizar i4 12/.test(model)) {
+    return 'standard';
+  }
+
+  return '';
+}
+
+function vehiclePowerKind(fleet) {
+  if (['electric', 'hybrid', 'cng', 'diesel'].includes(fleet?.power)) {
+    return fleet.power;
+  }
+
+  const model = vehicleModelNeedle(fleet);
+  if (/electric|ecitaro|\bev\b|12m ev|e-bus|elektr/.test(model) || fleet?.isElectric === true) {
+    return 'electric';
+  }
+
+  if (/hybrid|hübriid|hubriid/.test(model)) {
+    return 'hybrid';
+  }
+
+  if (/cng|gaas/.test(model)) {
+    return 'cng';
+  }
+
+  if (model) {
+    return 'diesel';
+  }
+
+  return '';
+}
+
+function vehicleModelNeedle(fleet) {
+  return [
+    fleet?.model,
+    fleet?.powerLabel,
+    fleet?.powerShort,
+    fleet?.sizeLabel,
+  ].filter(Boolean).join(' ').toLocaleLowerCase('et');
 }
 
 function vehicleFacts(fleet, sizeLabel, powerLabel) {
@@ -2217,7 +3895,7 @@ function vehicleFacts(fleet, sizeLabel, powerLabel) {
   }
 
   if (powerLabel) {
-    facts.push({ icon: vehiclePowerIcon(fleet.power), label: powerLabel });
+    facts.push({ icon: vehiclePowerIcon(vehiclePowerKind(fleet)), label: powerLabel });
   }
 
   return facts;
@@ -2244,7 +3922,7 @@ function vehicleFleetInfoHtml(profile) {
     return `
       <div class="vehicle-facts is-missing">
         <span class="vehicle-fact">
-          <i data-lucide="info"></i>
+          ${vehicleFactIconHtml('info')}
           <strong>Info puudub</strong>
         </span>
       </div>
@@ -2255,12 +3933,24 @@ function vehicleFleetInfoHtml(profile) {
     <div class="vehicle-facts">
       ${profile.facts.map((fact) => `
         <span class="vehicle-fact">
-          <i data-lucide="${escapeHtml(fact.icon)}"></i>
+          ${vehicleFactIconHtml(fact.icon)}
           <strong>${escapeHtml(fact.label)}</strong>
         </span>
       `).join('')}
     </div>
   `;
+}
+
+function vehicleFactIconHtml(icon) {
+  const icons = {
+    info: '<svg class="vehicle-fact-svg" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 10v6"></path><path d="M12 7h.01"></path></svg>',
+    ruler: '<svg class="vehicle-fact-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 15 15 4l5 5L9 20z"></path><path d="M8 15l-2-2"></path><path d="M11 12l-2-2"></path><path d="M14 9l-2-2"></path></svg>',
+    zap: '<svg class="vehicle-fact-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 10-14h-7z"></path></svg>',
+    leaf: '<svg class="vehicle-fact-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20c8 0 14-6 14-14V4h-2C9 4 3 10 3 18c0 1 1 2 2 2z"></path><path d="M3 20c4-6 8-9 14-12"></path></svg>',
+    fuel: '<svg class="vehicle-fact-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 21V5a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v16"></path><path d="M4 11h11"></path><path d="M15 7h2l3 3v7a2 2 0 0 1-2 2h-1"></path></svg>',
+  };
+
+  return icons[icon] || icons.info;
 }
 
 function renderLineTags() {
@@ -2307,6 +3997,7 @@ function renderLineTags() {
       state.selectedLines = state.selectedLines.filter((item) => item !== line);
       saveLines();
       renderLineTags();
+      renderScheduleLineOptions();
       state.shouldFitVehicles = true;
       fetchVehicles();
       fetchRoutes();
@@ -2349,6 +4040,10 @@ function syncLineColorControls(line, color) {
 
     if (element.classList.contains('line-emphasis-input')) {
       applyLineSliderStyle(element, color, Number(element.value));
+    }
+
+    if (element.classList.contains('route-badge')) {
+      element.style.setProperty('--badge-color', color);
     }
 
     if (element.matches('input[type="color"]')) {
@@ -2452,24 +4147,107 @@ function refreshLineEmphasis() {
   renderVehicles();
 }
 
+function updateUserLocation(position, { center = false } = {}) {
+  if (!state.map) {
+    return;
+  }
+
+  const coords = [position.coords.latitude, position.coords.longitude];
+  const accuracy = Number(position.coords.accuracy);
+
+  if (!state.userLocationAccuracyCircle) {
+    state.userLocationAccuracyCircle = L.circle(coords, {
+      radius: Number.isFinite(accuracy) ? accuracy : 35,
+      color: '#0f5e62',
+      weight: 1.5,
+      fillColor: '#0f5e62',
+      fillOpacity: 0.08,
+      opacity: 0.32,
+      interactive: false,
+    }).addTo(state.map);
+  } else {
+    state.userLocationAccuracyCircle.setLatLng(coords);
+    if (Number.isFinite(accuracy)) {
+      state.userLocationAccuracyCircle.setRadius(accuracy);
+    }
+  }
+
+  if (!state.userLocationMarker) {
+    state.userLocationMarker = L.circleMarker(coords, {
+      radius: 8,
+      color: '#ffffff',
+      weight: 2.5,
+      fillColor: '#0f5e62',
+      fillOpacity: 0.95,
+      className: 'user-location-marker',
+    }).addTo(state.map).bindPopup('Sinu asukoht');
+  } else {
+    state.userLocationMarker.setLatLng(coords);
+  }
+
+  if (center) {
+    state.map.setView(coords, Math.max(state.map.getZoom(), 15));
+    state.userLocationMarker.openPopup();
+  }
+}
+
+function requestUserLocation({ center = false } = {}) {
+  if (!navigator.geolocation) {
+    setStatus('Asukoht puudub', false);
+    return;
+  }
+
+  if (state.userLocationPending) {
+    return;
+  }
+
+  state.userLocationPending = true;
+  navigator.geolocation.getCurrentPosition((position) => {
+    state.userLocationPending = false;
+    updateUserLocation(position, { center });
+  }, (error) => {
+    state.userLocationPending = false;
+    if (error.code === 1 || error.code === error.PERMISSION_DENIED) {
+      stopUserLocationTracking();
+      setStatus('Asukoht keelatud', false);
+      return;
+    }
+
+    setStatus('GPS uuendus ebaõnnestus', false);
+  }, {
+    enableHighAccuracy: true,
+    timeout: 4500,
+    maximumAge: 0,
+  });
+}
+
+function stopUserLocationTracking() {
+  state.userLocationActive = false;
+  state.userLocationPending = false;
+  if (state.userLocationTimer) {
+    window.clearInterval(state.userLocationTimer);
+    state.userLocationTimer = null;
+  }
+}
+
 function locateUser() {
   if (!navigator.geolocation) {
     setStatus('Asukoht puudub', false);
     return;
   }
 
-  navigator.geolocation.getCurrentPosition((position) => {
-    const coords = [position.coords.latitude, position.coords.longitude];
-    L.circleMarker(coords, {
-      radius: 8,
-      color: '#0f5e62',
-      fillColor: '#0f5e62',
-      fillOpacity: 0.9,
-    }).addTo(state.map).bindPopup('Sinu asukoht').openPopup();
-    state.map.setView(coords, 15);
-  }, () => {
-    setStatus('Asukoht keelatud', false);
-  }, { enableHighAccuracy: true, timeout: 8000 });
+  state.userLocationActive = true;
+  requestUserLocation({ center: true });
+
+  if (state.userLocationTimer) {
+    window.clearInterval(state.userLocationTimer);
+  }
+
+  state.userLocationTimer = window.setInterval(() => {
+    if (state.userLocationActive) {
+      requestUserLocation();
+    }
+  }, GPS_REFRESH_MS);
 }
 
 async function fetchJson(url, options = {}) {
@@ -2558,6 +4336,30 @@ function loadLineEmphasis() {
 function saveLineEmphasis() {
   localStorage.setItem('bussradar.lineEmphasis', JSON.stringify(state.lineEmphasis));
   queuePreferenceSave();
+}
+
+function loadScheduleLine() {
+  try {
+    const stored = normalizeLine(localStorage.getItem('bussradar.scheduleLine') || '');
+    if (stored) {
+      return stored;
+    }
+  } catch {
+    return DEFAULT_LINES[0];
+  }
+
+  return DEFAULT_LINES[0];
+}
+
+function saveScheduleLine() {
+  if (state.scheduleLine) {
+    localStorage.setItem('bussradar.scheduleLine', state.scheduleLine);
+  }
+}
+
+function uniqueSortedLines(lines) {
+  return [...new Set(lines.map((line) => normalizeLine(String(line || ''))).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, 'et', { numeric: true }));
 }
 
 function lineEmphasis(line) {

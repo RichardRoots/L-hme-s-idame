@@ -1,14 +1,13 @@
 $ErrorActionPreference = "Stop"
 
-$Source = "https://ebus.ee/index.php?a=ps&did=8&v=list"
+$Sources = @(
+    "https://ebus.ee/index.php?a=ps&did=8&v=list",
+    "https://ebus.ee/index.php?a=ps&did=13&v=list"
+)
 $DataDir = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot (Join-Path ".." "data")))
 $OutputPath = Join-Path $DataDir "fleet.json"
-$TempPath = Join-Path $DataDir "fleet-source.html"
 
 New-Item -ItemType Directory -Force -Path $DataDir | Out-Null
-Invoke-WebRequest -Uri $Source -UseBasicParsing -OutFile $TempPath
-$html = [System.IO.File]::ReadAllText(([System.IO.Path]::GetFullPath($TempPath)), [System.Text.Encoding]::UTF8)
-
 function Clean-HtmlText {
     param([AllowNull()][string]$Value)
     if ($null -eq $Value) {
@@ -24,11 +23,11 @@ function Vehicle-Profile {
     param([Parameter(Mandatory = $true)][string]$Model)
 
     $modelLower = $Model.ToLowerInvariant()
-    $isElectric = $modelLower -match "electric|ecitaro|\bev\b"
+    $isElectric = $modelLower -match "electric|ecitaro|\bev\b|12m ev|e-bus|elektr"
     $isHybrid = $modelLower -match "hybrid"
-    $isCng = $modelLower -match "cng"
-    $isArticulated = $modelLower -match "\b18\b|a40|6x2|ng323|liigend|gl "
-    $isStandard = $modelLower -match "\b12\b|12m|a78|a21|nl283|el293|7900|procity"
+    $isCng = $modelLower -match "cng|gaas"
+    $isArticulated = $modelLower -match "\b18\b|18m|a40|6x2|ng323|ng313|liigend|articulated|gl "
+    $isStandard = $modelLower -match "\b12\b|12m|12\.|a78|a21|nl283|el293|7900|procity|urbino iv 12|urbino 12|irizar i4 12"
 
     $power = "unknown"
     $powerLabel = "Ajam teadmata"
@@ -43,12 +42,12 @@ function Vehicle-Profile {
         $powerShort = "h$([char]0x00FC)briid"
     } elseif ($isCng) {
         $power = "cng"
-        $powerLabel = "CNG / gaasibuss"
-        $powerShort = "CNG"
+        $powerLabel = "Gaasibuss"
+        $powerShort = "gaas"
     } else {
         $power = "diesel"
-        $powerLabel = "Mitte elektriline"
-        $powerShort = "mitte elekter"
+        $powerLabel = "Diisel"
+        $powerShort = "diisel"
     }
 
     $size = "unknown"
@@ -57,12 +56,12 @@ function Vehicle-Profile {
     $badge = "?"
     if ($isArticulated) {
         $size = "articulated"
-        $sizeLabel = "Pikk / liigendbuss"
+        $sizeLabel = "Pikk buss"
         $lengthMeters = 18
         $badge = "18"
     } elseif ($isStandard) {
         $size = "standard"
-        $sizeLabel = "L$([char]0x00FC)hike / 12 m"
+        $sizeLabel = "L$([char]0x00FC)hike buss"
         $lengthMeters = 12
         $badge = "12"
     }
@@ -86,50 +85,58 @@ $rowRegex = [regex]::new(
 )
 
 $vehicles = [ordered]@{}
-foreach ($match in $rowRegex.Matches($html)) {
-    $id = Clean-HtmlText $match.Groups["id"].Value
-    if ($id -notmatch "^\d{3,5}$") {
-        continue
+foreach ($source in $Sources) {
+    $tempPath = Join-Path $DataDir ("fleet-source-{0}.html" -f ([Array]::IndexOf($Sources, $source)))
+    Invoke-WebRequest -Uri $source -UseBasicParsing -OutFile $tempPath
+    $html = [System.IO.File]::ReadAllText(([System.IO.Path]::GetFullPath($tempPath)), [System.Text.Encoding]::UTF8)
+
+    foreach ($match in $rowRegex.Matches($html)) {
+        $id = Clean-HtmlText $match.Groups["id"].Value
+        if ($id -notmatch "^\d{3,5}$") {
+            continue
+        }
+
+        $retired = Clean-HtmlText $match.Groups["retired"].Value
+        if ($retired -ne "") {
+            continue
+        }
+
+        $model = Clean-HtmlText $match.Groups["model"].Value
+        if ($model -eq "") {
+            continue
+        }
+
+        $profile = Vehicle-Profile $model
+        $vehicles[$id] = [ordered]@{
+            id = $id
+            registration = Clean-HtmlText $match.Groups["reg"].Value
+            model = $model
+            year = Clean-HtmlText $match.Groups["year"].Value
+            factoryNumber = Clean-HtmlText $match.Groups["factory"].Value
+            inServiceSince = Clean-HtmlText $match.Groups["started"].Value
+            note = Clean-HtmlText $match.Groups["note"].Value
+            sourceUrl = $source
+            size = $profile.size
+            sizeLabel = $profile.sizeLabel
+            lengthMeters = $profile.lengthMeters
+            power = $profile.power
+            powerLabel = $profile.powerLabel
+            powerShort = $profile.powerShort
+            isElectric = $profile.isElectric
+            isArticulated = $profile.isArticulated
+            badge = $profile.badge
+        }
     }
 
-    $retired = Clean-HtmlText $match.Groups["retired"].Value
-    if ($retired -ne "") {
-        continue
-    }
-
-    $model = Clean-HtmlText $match.Groups["model"].Value
-    if ($model -eq "") {
-        continue
-    }
-
-    $profile = Vehicle-Profile $model
-    $vehicles[$id] = [ordered]@{
-        id = $id
-        registration = Clean-HtmlText $match.Groups["reg"].Value
-        model = $model
-        year = Clean-HtmlText $match.Groups["year"].Value
-        factoryNumber = Clean-HtmlText $match.Groups["factory"].Value
-        inServiceSince = Clean-HtmlText $match.Groups["started"].Value
-        note = Clean-HtmlText $match.Groups["note"].Value
-        size = $profile.size
-        sizeLabel = $profile.sizeLabel
-        lengthMeters = $profile.lengthMeters
-        power = $profile.power
-        powerLabel = $profile.powerLabel
-        powerShort = $profile.powerShort
-        isElectric = $profile.isElectric
-        isArticulated = $profile.isArticulated
-        badge = $profile.badge
-    }
+    Remove-Item -LiteralPath $tempPath -ErrorAction SilentlyContinue
 }
 
 $payload = [ordered]@{
     updatedAt = (Get-Date).ToUniversalTime().ToString("o")
-    source = $Source
+    sources = $Sources
     vehicles = $vehicles
 }
 
 $json = $payload | ConvertTo-Json -Depth 8
 [System.IO.File]::WriteAllText(([System.IO.Path]::GetFullPath($OutputPath)), $json, [System.Text.Encoding]::UTF8)
-Remove-Item -LiteralPath $TempPath -ErrorAction SilentlyContinue
 Write-Host "Updated fleet data: $($vehicles.Count) active vehicles."

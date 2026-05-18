@@ -27,8 +27,12 @@
         return handleStops(parsed.searchParams);
       case 'mapStops':
         return handleMapStops();
+      case 'lines':
+        return handleLines(parsed.searchParams);
       case 'routes':
         return handleRoutes(parsed.searchParams);
+      case 'schedule':
+        return handleSchedule(parsed.searchParams);
       case 'departures':
         return handleDepartures(parsed.searchParams);
       case 'schools':
@@ -96,6 +100,19 @@
     };
   }
 
+  async function handleLines(params) {
+    const wantedType = cleanText(params.get('type') || 'bus').toLowerCase();
+    const raw = await fetchText(`${DATA_BASE}/data/routes.txt`, { ttl: 60 * 60 * 1000 });
+    const lines = parseAvailableLines(raw, wantedType);
+
+    return {
+      ok: true,
+      source: `${DATA_BASE}/data/routes.txt`,
+      updatedAt: new Date().toISOString(),
+      lines,
+    };
+  }
+
   async function handleRoutes(params) {
     const lineFilter = normalizeLineList(params.get('lines') || '');
     if (lineFilter.length === 0) {
@@ -119,6 +136,32 @@
     return {
       ok: true,
       source: `${DATA_BASE}/data/tallinna-linn_bus_<line>.txt`,
+      updatedAt: new Date().toISOString(),
+      routes,
+    };
+  }
+
+  async function handleSchedule(params) {
+    const lineFilter = normalizeLineList(params.get('line') || params.get('lines') || '');
+    if (lineFilter.length === 0) {
+      return { ok: true, routes: [] };
+    }
+
+    const [stopsRaw, routesRaw] = await Promise.all([
+      fetchText(`${DATA_BASE}/data/stops.txt`, { ttl: 60 * 60 * 1000 }),
+      fetchText(`${DATA_BASE}/data/routes.txt`, { ttl: 60 * 60 * 1000 }),
+    ]);
+    const stopsByPlatformId = new Map();
+
+    parseStructuredStops(stopsRaw, true).forEach((stop) => {
+      stopsByPlatformId.set(stop.stopId, stop);
+    });
+
+    const routes = parseRouteLines(routesRaw, stopsByPlatformId, lineFilter, true);
+
+    return {
+      ok: true,
+      source: `${DATA_BASE}/data/routes.txt`,
       updatedAt: new Date().toISOString(),
       routes,
     };
@@ -661,13 +704,46 @@
     }));
   }
 
-  function parseRouteLines(raw, stopsByPlatformId, lineFilter) {
+  function parseAvailableLines(raw, wantedType = 'bus') {
+    const rows = tableRows(raw, ';');
+    const lines = new Set();
+    let currentLine = '';
+    let currentTransport = '';
+
+    rows.slice(1).forEach((sourceRow) => {
+      const row = padRow(sourceRow, 14);
+      const line = cleanText(removeBom(row[0]));
+      const transport = cleanText(row[3]).toLowerCase();
+
+      if (line) {
+        const normalized = line.toUpperCase();
+        if (!/^[0-9A-Z]+$/.test(normalized)) {
+          return;
+        }
+        currentLine = normalized;
+      }
+
+      if (transport) {
+        currentTransport = transport;
+      }
+
+      const routeStopsRaw = cleanText(row[13]);
+      const typeMatches = !wantedType || wantedType === 'all' || currentTransport === wantedType;
+      if (currentLine && routeStopsRaw && typeMatches) {
+        lines.add(currentLine);
+      }
+    });
+
+    return [...lines].sort((a, b) => a.localeCompare(b, 'et', { numeric: true }));
+  }
+
+  function parseRouteLines(raw, stopsByPlatformId, lineFilter, includeTimes = false) {
     const rows = tableRows(raw, ';');
     const routes = [];
     let currentLine = '';
     let currentTransport = '';
 
-    rows.slice(1).forEach((sourceRow) => {
+    rows.slice(1).forEach((sourceRow, sourceIndex) => {
       const row = padRow(sourceRow, 14);
       const line = cleanText(removeBom(row[0]));
       const transport = cleanText(row[3]).toLowerCase();
@@ -701,7 +777,11 @@
         .map((stop) => ({
           id: stop.id,
           stopId: stop.stopId,
+          siriId: stop.siriId,
           name: stop.name,
+          street: stop.street,
+          area: stop.area,
+          city: stop.city,
           lat: stop.lat,
           lon: stop.lon,
         }));
@@ -713,9 +793,14 @@
       routes.push({
         line: currentLine,
         tag: cleanText(row[8]),
+        routeType: cleanText(row[9]),
         name: cleanText(row[10]),
+        weekdays: cleanText(row[11]),
+        streets: cleanText(row[12]),
+        operator: cleanText(row[4]),
         points: stops.map((stop) => [stop.lat, stop.lon]),
         stops,
+        ...(includeTimes ? { times: cleanText(rows[sourceIndex + 2]?.[0] || '') } : {}),
       });
     });
 
