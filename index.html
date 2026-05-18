@@ -4,18 +4,20 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0f5e62">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; worker-src 'self'; manifest-src 'self'; script-src 'self' https://unpkg.com; style-src 'self' 'unsafe-inline' https://unpkg.com; connect-src 'self' https://transport.tallinn.ee https://api.open-meteo.com https://r.jina.ai https://api.allorigins.win; img-src 'self' data: https://unpkg.com https://tile.openstreetmap.org https://*.basemaps.cartocdn.com;">
   <title>BussRadar Tallinn</title>
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://unpkg.com">
   <link rel="preconnect" href="https://tile.openstreetmap.org">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="assets/css/styles.css">
+  <link rel="stylesheet" href="assets/css/styles.css?v=110">
 </head>
 <body>
   <div class="app-shell">
     <header class="topbar">
-      <a class="brand" href="index.php" aria-label="BussRadar Tallinn avaleht">
+      <a class="brand" href="index.html" aria-label="BussRadar Tallinn avaleht">
         <span class="brand-mark"><i data-lucide="bus-front"></i></span>
         <span>
           <strong>BussRadar</strong>
@@ -28,7 +30,7 @@
         <button class="icon-button" id="themeToggle" type="button" title="Tume režiim" aria-label="Tume režiim">
           <i data-lucide="moon"></i>
         </button>
-        <a class="install-button account-button" id="accountLink" href="login.php" title="Logi sisse" aria-label="Logi sisse">
+        <a class="install-button account-button" id="accountLink" href="login.html" title="Logi sisse" aria-label="Logi sisse">
           <i data-lucide="log-in"></i>
           <span id="authButtonText">Logi sisse</span>
         </a>
@@ -151,14 +153,18 @@
 
       <section class="map-area" aria-label="Tallinna bussikaart">
         <div id="map"></div>
-        <div class="map-legend">
-          <span><i class="legend-line route route-forward"></i>1. suund</span>
-          <span><i class="legend-line route route-reverse"></i>2. suund</span>
-          <span><i class="legend-dot stop"></i>Peatus</span>
-          <span><i class="legend-dot favorite"></i>Lemmik</span>
-          <span><i class="legend-dot bus"></i>Buss</span>
-          <span><i class="legend-dot crowd"></i>Õpilased</span>
-          <span><i class="legend-dot delay"></i>Hilinemise risk</span>
+        <div class="map-legend" aria-label="Kaardi leppemärgid">
+          <div class="legend-group">
+            <strong>Marsruut</strong>
+            <span><i class="legend-line route route-forward"></i>Lõunapoolne suund</span>
+            <span><i class="legend-line route route-reverse"></i>Soomepoolne suund</span>
+          </div>
+          <div class="legend-group">
+            <strong>Märgid</strong>
+            <span><i class="legend-dot stop"></i>Peatus</span>
+            <span><i class="legend-dot bus"></i>Buss</span>
+            <span><i class="legend-dot favorite"></i>Lemmik</span>
+          </div>
         </div>
       </section>
     </main>
@@ -166,6 +172,7 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
-  <script src="assets/js/app.js" defer></script>
+  <script src="assets/js/static-api.js?v=110"></script>
+  <script src="assets/js/app.js?v=110" defer></script>
 </body>
 </html>

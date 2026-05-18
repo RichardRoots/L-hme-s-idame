@@ -49,7 +49,7 @@ function bindEvents() {
 
 async function loadAuthStatus() {
   try {
-    const data = await fetchJson('api.php?action=authStatus');
+    const data = await fetchJson('api.html?action=authStatus');
     syncAuthState(data);
   } catch (error) {
     state.user = null;
@@ -70,7 +70,7 @@ async function submitAuth(action) {
   renderAuthUi(action === 'register' ? 'Loon kontot...' : 'Login sisse...');
 
   try {
-    const data = await fetchJson(`api.php?action=${action}`, {
+    const data = await fetchJson(`api.html?action=${action}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),
@@ -78,7 +78,7 @@ async function submitAuth(action) {
 
     syncAuthState(data);
     await syncPreferencesAfterLogin(data.preferences);
-    window.location.href = 'index.php';
+    window.location.href = 'index.html';
   } catch (error) {
     renderAuthUi(error.message);
   } finally {
@@ -89,7 +89,7 @@ async function submitAuth(action) {
 async function logoutUser() {
   setBusy(true);
   try {
-    await fetchJson('api.php?action=logout', { method: 'POST' });
+    await fetchJson('api.html?action=logout', { method: 'POST' });
     state.user = null;
     renderAuthUi('Välja logitud.');
   } catch (error) {
@@ -130,7 +130,7 @@ async function syncPreferencesAfterLogin(preferences) {
     return;
   }
 
-  await fetchJson('api.php?action=preferences', {
+  await fetchJson('api.html?action=preferences', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(localPreferencesPayload()),
@@ -180,6 +180,10 @@ function readJson(key, fallback) {
 }
 
 async function fetchJson(url, options = {}) {
+  if (window.BussRadarApi?.canHandle?.(url)) {
+    return window.BussRadarApi.request(url, options);
+  }
+
   const response = await fetch(url, {
     ...options,
     cache: 'no-store',

@@ -1,0 +1,46 @@
+name: Update transit data mirror
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/5 * * * *'
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/update-transit-data.yml'
+      - 'tools/update-transit-data.mjs'
+      - 'tools/update-fleet-data.ps1'
+      - 'assets/js/static-api.js'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: transit-data-mirror
+  cancel-in-progress: true
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Download latest transit files
+        run: node tools/update-transit-data.mjs
+
+      - name: Download latest fleet data
+        shell: pwsh
+        run: ./tools/update-fleet-data.ps1
+
+      - name: Commit mirror data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/live data/fleet.json
+          git diff --cached --quiet || git commit -m "Update transit data mirror"
+          git push

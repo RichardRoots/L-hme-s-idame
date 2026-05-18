@@ -2,16 +2,25 @@ const TALLINN_CENTER = [59.437, 24.7536];
 const DEFAULT_LINES = ['18', '40', '60'];
 const DEFAULT_STOP = { id: '1297', name: 'Laikmaa', lat: 59.43614, lon: 24.75755 };
 const REFRESH_SECONDS = 10;
+const WEATHER_REFRESH_MS = 10 * 60 * 1000;
 const THEME_KEY = 'bussradar.theme';
-const ROUTE_DIRECTION_PATTERNS = [
-  { label: '1. suund', dashArray: null, dashOffset: '0', weight: 5, priority: 0 },
-  { label: '2. suund', dashArray: '1 8', dashOffset: '0', weight: 6, priority: 1 },
-  { label: '3. suund', dashArray: '8 7', dashOffset: '0', weight: 5, priority: 2 },
-  { label: '4. suund', dashArray: '12 5 2 5', dashOffset: '0', weight: 5, priority: 3 },
-];
+const ROUTE_SIDE_STYLES = {
+  south: { label: 'Lõuna pool', dashArray: null, dashOffset: '0', weight: 5, mapSide: 'south', priority: 0, sharedDash: 58, sharedGap: 0 },
+  north: { label: 'Soome pool', dashArray: '1 13', dashOffset: '0', weight: 5, mapSide: 'north', priority: 1, sharedDash: 1, sharedGap: 13 },
+};
+const ROUTE_MAX_POINT_JUMP_METERS = 1100;
+const ROUTE_SIDE_OFFSET_PX = 7;
+const ROUTE_SIDE_CENTER_EPS_PX = 18;
+const ROUTE_OVERLAP_DISTANCE_PX = 72;
+const ROUTE_SEGMENT_HEADING_TOLERANCE = 26;
+const ROUTE_DETAIL_ZOOM = 99;
+const MAP_STOP_VISIBLE_ZOOM = 12;
+const MAP_STOP_FULL_ZOOM = 14;
+const MAP_STOP_FALLBACK_COLOR = '#063f3d';
 
 const state = {
   map: null,
+  tileLayer: null,
   routeLayer: null,
   mapStopLayer: null,
   vehicleLayer: null,
@@ -27,6 +36,7 @@ const state = {
   selectedStop: loadStop(),
   favoriteStops: loadFavoriteStops(),
   vehicles: [],
+  fleet: {},
   routes: [],
   mapStops: [],
   departures: [],
@@ -36,6 +46,7 @@ const state = {
   refreshCountdown: REFRESH_SECONDS,
   refreshTimer: null,
   countdownTimer: null,
+  lastWeatherFetch: 0,
   deferredInstallPrompt: null,
   user: null,
   theme: loadTheme(),
@@ -52,6 +63,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   renderLineTags();
   registerServiceWorker();
   await loadAuthStatus();
+  await loadFleetData();
   loadInitialData();
   lucide.createIcons();
 });
@@ -99,7 +111,7 @@ function createMap() {
 
   L.control.zoom({ position: 'bottomright' }).addTo(state.map);
 
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+  state.tileLayer = L.tileLayer(mapTileUrl(state.theme), {
     maxZoom: 19,
     subdomains: 'abcd',
     attribution: '&copy; OpenStreetMap &copy; CARTO',
@@ -125,7 +137,15 @@ function createMap() {
   state.favoriteStopLayer = L.layerGroup().addTo(state.map);
   state.vehicleLayer = L.layerGroup().addTo(state.map);
 
-  state.map.on('zoomend', updateMapDensity);
+  state.map.on('zoomend', () => {
+    updateMapDensity();
+    if (state.routes.length > 0) {
+      renderRoutes();
+    }
+    if (state.mapStops.length > 0) {
+      renderMapStops();
+    }
+  });
   state.map.on('popupopen', hydrateIcons);
   updateMapDensity();
 }
@@ -206,7 +226,7 @@ function bindEvents() {
 
 async function loadAuthStatus() {
   try {
-    const data = await fetchJson('api.php?action=authStatus');
+    const data = await fetchJson('api.html?action=authStatus');
     syncAuthState(data, { reload: false, saveIfEmpty: false });
   } catch (error) {
     state.user = null;
@@ -322,7 +342,7 @@ async function savePreferencesNow() {
   }
 
   window.clearTimeout(state.preferenceSaveTimer);
-  await fetchJson('api.php?action=preferences', {
+  await fetchJson('api.html?action=preferences', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(preferencesPayload()),
@@ -363,6 +383,10 @@ function applyTheme(theme) {
   const normalizedTheme = theme === 'dark' ? 'dark' : 'light';
   document.documentElement.dataset.theme = normalizedTheme;
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', normalizedTheme === 'dark' ? '#101a18' : '#0f5e62');
+  setMapTileTheme(normalizedTheme);
+  if (state.routeLayer && state.routes.length > 0) {
+    renderRoutes();
+  }
 
   if (!els.themeToggle) {
     return;
@@ -377,6 +401,20 @@ function applyTheme(theme) {
   }
 }
 
+function mapTileUrl(theme) {
+  return theme === 'dark'
+    ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+    : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+}
+
+function setMapTileTheme(theme) {
+  if (!state.tileLayer) {
+    return;
+  }
+
+  state.tileLayer.setUrl(mapTileUrl(theme));
+}
+
 function loadInitialData() {
   els.selectedStopName.textContent = state.selectedStop.name;
   els.toggleSchools.classList.toggle('muted', !state.schoolsVisible);
@@ -385,8 +423,26 @@ function loadInitialData() {
   fetchRoutes();
   refreshAll();
   loadSchools();
-  fetchWeather();
   startRefreshLoop();
+}
+
+async function loadFleetData() {
+  try {
+    const response = await fetch('data/fleet.json', {
+      cache: 'no-store',
+      credentials: 'same-origin',
+      headers: { Accept: 'application/json' },
+    });
+
+    if (!response.ok) {
+      throw new Error('Veeremiandmeid ei leitud.');
+    }
+
+    const data = await response.json();
+    state.fleet = data.vehicles && typeof data.vehicles === 'object' ? data.vehicles : {};
+  } catch {
+    state.fleet = {};
+  }
 }
 
 function refreshAll() {
@@ -433,7 +489,7 @@ async function fetchVehicles() {
   });
 
   try {
-    const data = await fetchJson(`api.php?${params.toString()}`);
+    const data = await fetchJson(`api.html?${params.toString()}`);
     state.vehicles = (data.vehicles || []).filter(isVehicleCoordinate);
     renderVehicles();
     renderDelayPanel();
@@ -446,27 +502,50 @@ async function fetchVehicles() {
 }
 
 function renderVehicles() {
-  state.vehicleLayer.clearLayers();
-  state.vehicleMarkers.clear();
+  const activeKeys = new Set();
 
   state.vehicles.forEach((vehicle) => {
-    const emphasis = lineMapOpacity(vehicle.line);
-    if (emphasis <= 0) {
+    const risk = vehicleDelayRisk(vehicle);
+    const key = vehicleKey(vehicle);
+    const title = `Liin ${vehicle.line}`;
+    const popupContent = vehiclePopup(vehicle, risk);
+    const signature = vehicleIconSignature(vehicle, risk);
+    activeKeys.add(key);
+
+    let marker = state.vehicleMarkers.get(key);
+    if (marker) {
+      marker.setLatLng([vehicle.lat, vehicle.lon]);
+      if (marker.bussRadarIconSignature !== signature) {
+        marker.setIcon(vehicleIcon(vehicle, risk));
+        marker.bussRadarIconSignature = signature;
+      }
+      updateVehicleMarkerElement(marker, vehicle);
+      marker.setOpacity(1);
+      marker.setPopupContent(popupContent);
+      marker.options.title = title;
+      marker.getElement()?.setAttribute('title', title);
       return;
     }
 
-    const risk = vehicleDelayRisk(vehicle);
-    const marker = L.marker([vehicle.lat, vehicle.lon], {
+    marker = L.marker([vehicle.lat, vehicle.lon], {
       icon: vehicleIcon(vehicle, risk),
       pane: 'vehiclePane',
-      title: `Liin ${vehicle.line}`,
+      title,
       zIndexOffset: 1000,
-      opacity: emphasis,
+      opacity: 1,
     });
 
-    marker.bindPopup(vehiclePopup(vehicle, risk));
+    marker.bussRadarIconSignature = signature;
+    marker.bindPopup(popupContent);
     marker.addTo(state.vehicleLayer);
-    state.vehicleMarkers.set(vehicleKey(vehicle), marker);
+    state.vehicleMarkers.set(key, marker);
+  });
+
+  state.vehicleMarkers.forEach((marker, key) => {
+    if (!activeKeys.has(key)) {
+      state.vehicleLayer.removeLayer(marker);
+      state.vehicleMarkers.delete(key);
+    }
   });
 
   els.vehicleCount.textContent = `${state.vehicles.length} kaardil`;
@@ -478,6 +557,42 @@ function renderVehicles() {
       state.map.fitBounds(bounds.pad(0.28), { maxZoom: 15, animate: true });
     }
     state.shouldFitVehicles = false;
+  }
+}
+
+function vehicleIconSignature(vehicle, risk) {
+  const profile = vehicleProfile(vehicle);
+  return [
+    vehicle.line,
+    shortText(vehicle.destination || '', 12),
+    risk.level,
+    profile.badge || '',
+    vehicleTypeClass(profile),
+  ].join('|');
+}
+
+function updateVehicleMarkerElement(marker, vehicle) {
+  const element = marker.getElement();
+  if (!element) {
+    return;
+  }
+
+  const color = routeColor(vehicle.line);
+  const bearing = Number.isFinite(Number(vehicle.bearing)) ? Number(vehicle.bearing) : 0;
+  const pin = element.querySelector('.vehicle-pin');
+  if (pin) {
+    pin.style.setProperty('--vehicle-color', color);
+    pin.style.setProperty('--bearing', `${bearing}deg`);
+  }
+
+  const lineLabel = pin?.querySelector('strong');
+  if (lineLabel) {
+    lineLabel.textContent = vehicle.line;
+  }
+
+  const destination = element.querySelector('.vehicle-label');
+  if (destination) {
+    destination.textContent = shortText(vehicle.destination || '', 12) || vehicle.destination || 'Siht teadmata';
   }
 }
 
@@ -500,7 +615,7 @@ function isStopCoordinate(stop) {
 
 async function loadMapStops() {
   try {
-    const data = await fetchJson('api.php?action=mapStops');
+    const data = await fetchJson('api.html?action=mapStops');
     state.mapStops = data.stops || [];
     renderMapStops();
   } catch (error) {
@@ -511,17 +626,27 @@ async function loadMapStops() {
 function renderMapStops() {
   state.mapStopLayer.clearLayers();
   state.mapStopMarkers.clear();
+  if (!shouldShowMapStops()) {
+    return;
+  }
 
   state.mapStops.forEach((stop) => {
-    const color = routeColor((stop.lines && stop.lines[0]) || stop.line || '');
+    const fullSize = shouldShowFullMapStops();
+    const opacity = stopMapOpacity(stop);
+    if (opacity <= 0) {
+      return;
+    }
+
+    const color = stopLineColor(stop) || MAP_STOP_FALLBACK_COLOR;
     const marker = L.circleMarker([stop.lat, stop.lon], {
       pane: 'mapStopPane',
-      radius: 5,
-      color,
-      weight: 2,
-      fillColor: '#fbfdff',
-      fillOpacity: 0.96,
-      opacity: 0.95,
+      radius: fullSize ? 5.8 : 4.4,
+      color: '#ffffff',
+      weight: fullSize ? 2.8 : 2.3,
+      fillColor: color,
+      fillOpacity: opacity,
+      opacity,
+      className: 'map-stop-point',
       bubblingMouseEvents: false,
     }).addTo(state.mapStopLayer);
 
@@ -546,6 +671,45 @@ function renderMapStops() {
   });
 }
 
+function shouldShowMapStops() {
+  return !state.map || state.map.getZoom() >= MAP_STOP_VISIBLE_ZOOM;
+}
+
+function shouldShowFullMapStops() {
+  return !state.map || state.map.getZoom() >= MAP_STOP_FULL_ZOOM;
+}
+
+function stopLineColor(stop) {
+  const lines = stopLines(stop);
+  if (lines.length === 0) {
+    return MAP_STOP_FALLBACK_COLOR;
+  }
+
+  const bestLine = lines
+    .map((line) => ({ line, opacity: lineMapOpacity(line) }))
+    .sort((a, b) => b.opacity - a.opacity || a.line.localeCompare(b.line, 'et', { numeric: true }))[0];
+
+  return routeColor(bestLine.line);
+}
+
+function stopMapOpacity(stop) {
+  const lines = stopLines(stop);
+  if (lines.length === 0) {
+    return 1;
+  }
+
+  return Math.max(...lines.map(lineMapOpacity));
+}
+
+function stopLines(stop) {
+  const sourceLines = Array.isArray(stop.lines) ? stop.lines : [stop.line];
+  return [...new Set(
+    sourceLines
+      .map((line) => normalizeLine(String(line || '')))
+      .filter(Boolean),
+  )].sort((a, b) => a.localeCompare(b, 'et', { numeric: true }));
+}
+
 async function searchFavoriteStops() {
   const query = els.favoriteStopSearch.value.trim();
   if (query.length < 2) {
@@ -557,7 +721,7 @@ async function searchFavoriteStops() {
   const params = new URLSearchParams({ action: 'stops', q: query });
 
   try {
-    const data = await fetchJson(`api.php?${params.toString()}`);
+    const data = await fetchJson(`api.html?${params.toString()}`);
     renderFavoriteStopResults(data.stops || []);
   } catch (error) {
     renderInlineError(els.favoriteStopResults, error.message);
@@ -786,7 +950,7 @@ async function fetchRoutes() {
   });
 
   try {
-    const data = await fetchJson(`api.php?${params.toString()}`);
+    const data = await fetchJson(`api.html?${params.toString()}`);
     state.routes = data.routes || [];
     renderRoutes();
     renderRouteStops();
@@ -803,50 +967,512 @@ async function fetchRoutes() {
 function renderRoutes() {
   state.routeLayer.clearLayers();
 
-  const styledRoutes = [...state.routes]
-    .map((route) => ({ route, style: routeDirectionStyle(route) }))
+  const drawableRoutes = state.routes
+    .filter((route) => route.shapeQuality !== 'stops-only')
+    .filter((route) => Array.isArray(route.points) && route.points.length >= 2)
+    .filter((route) => lineMapOpacity(route.line) > 0);
+  const styledRoutes = drawableRoutes
+    .map((route) => ({ route, style: routePhysicalSideStyle(route, drawableRoutes) }))
     .sort((a, b) => a.style.priority - b.style.priority
       || String(a.route.line).localeCompare(String(b.route.line), 'et', { numeric: true }));
 
+  if (!shouldRenderDetailedRoutes()) {
+    renderOverviewRoutes(styledRoutes);
+    return;
+  }
+
+  const routeSegments = routeDrawingSegments(styledRoutes);
+  const routeRuns = routeDrawingRuns(routeSegments);
+
+  routeRuns.forEach((run) => {
+    renderRouteRun(run);
+  });
+}
+
+function shouldRenderDetailedRoutes() {
+  return state.map && state.map.getZoom() >= ROUTE_DETAIL_ZOOM;
+}
+
+function renderOverviewRoutes(styledRoutes) {
   styledRoutes.forEach(({ route, style }) => {
-    if (route.shapeQuality === 'stops-only' || !Array.isArray(route.points) || route.points.length < 2) {
-      return;
+    let segments = routeLineSegments(route.points);
+    if (routeNeedsOverviewSideOffset(route, styledRoutes)) {
+      segments = offsetRouteSegments(segments, style.mapSide);
     }
 
     const color = routeColor(route.line);
     const emphasis = lineMapOpacity(route.line);
-    if (emphasis <= 0) {
-      return;
-    }
 
-    const line = L.polyline(route.points, {
+    L.polyline(segments, {
       pane: 'routePane',
-      color,
-      weight: style.weight,
-      opacity: 0.98 * emphasis,
+      color: routeGapColor(),
+      weight: style.weight + 3,
+      opacity: style.dashArray ? 0.58 : 0.44,
       lineCap: 'round',
       lineJoin: 'round',
       dashArray: style.dashArray,
       dashOffset: style.dashOffset,
-      smoothFactor: 0,
+      smoothFactor: 1.5,
+      interactive: false,
     }).addTo(state.routeLayer);
 
-    const tooltipParts = [
-      `Liin ${escapeHtml(route.line)}`,
-      escapeHtml(style.label),
-      route.name ? escapeHtml(route.name) : '',
-    ];
+    const line = L.polyline(segments, {
+      pane: 'routePane',
+      color,
+      weight: style.weight,
+      opacity: 0.9 * emphasis,
+      lineCap: 'round',
+      lineJoin: 'round',
+      dashArray: style.dashArray,
+      dashOffset: style.dashOffset,
+      smoothFactor: 1.5,
+    }).addTo(state.routeLayer);
 
-    line.bindTooltip(tooltipParts.filter(Boolean).join(' · '), {
+    line.bindTooltip(`Liin ${escapeHtml(route.line)} · ${escapeHtml(style.label)}`, {
       sticky: true,
       opacity: 0.95,
     });
   });
 }
 
+function routeNeedsOverviewSideOffset(route, styledRoutes) {
+  const routeCenter = routeScreenCenter(route);
+  return styledRoutes.some((entry) => {
+    return entry.route !== route
+      && String(entry.route.line) === String(route.line)
+      && routeDirectionIndex(entry.route) % 2 !== routeDirectionIndex(route) % 2
+      && layerPointDistance(routeCenter, routeScreenCenter(entry.route)) <= ROUTE_SIDE_CENTER_EPS_PX;
+  });
+}
+
+function renderRouteRun(run) {
+  const { pattern, points, style } = run;
+  if (!pattern.isAlternating) {
+    L.polyline(points, {
+      pane: 'routePane',
+      color: routeGapColor(),
+      weight: style.weight + 4,
+      opacity: style.dashArray ? 0.7 : 0.58,
+      lineCap: 'round',
+      lineJoin: 'round',
+      dashArray: pattern.dashArray,
+      dashOffset: pattern.dashOffset,
+      smoothFactor: 0,
+      interactive: false,
+    }).addTo(state.routeLayer);
+  }
+
+  const line = L.polyline(points, {
+    pane: 'routePane',
+    color: run.color,
+    weight: style.weight,
+    opacity: run.opacity,
+    lineCap: pattern.lineCap,
+    lineJoin: 'round',
+    dashArray: pattern.dashArray,
+    dashOffset: pattern.dashOffset,
+    smoothFactor: 0,
+  }).addTo(state.routeLayer);
+
+  const tooltipParts = [
+    `Liin ${escapeHtml(run.line)}`,
+    escapeHtml(style.label),
+    run.route.name ? escapeHtml(run.route.name) : '',
+  ];
+
+  line.bindTooltip(tooltipParts.filter(Boolean).join(' · '), {
+    sticky: true,
+    opacity: 0.95,
+  });
+}
+
+function routeDrawingSegments(styledRoutes) {
+  const segments = [];
+
+  styledRoutes.forEach(({ route, style }) => {
+    routeLineSegments(route.points).forEach((routeSegment) => {
+      for (let index = 1; index < routeSegment.length; index += 1) {
+        const start = normalizeLatLon(routeSegment[index - 1]);
+        const end = normalizeLatLon(routeSegment[index]);
+        if (!start || !end || distanceMeters(start[0], start[1], end[0], end[1]) < 8) {
+          continue;
+        }
+
+        segments.push({
+          route,
+          style,
+          line: String(route.line),
+          points: [start, end],
+          color: routeColor(route.line),
+          opacity: 0.98 * lineMapOpacity(route.line),
+          direction: routeDirectionIndex(route) % 2,
+          heading: routeSegmentHeadingDegrees(start, end),
+          midpoint: routeSegmentMidpoint(start, end),
+        });
+      }
+    });
+  });
+
+  return segments;
+}
+
+function routeDrawingRuns(routeSegments) {
+  const prepared = routeSegments.map((segment) => {
+    const pattern = routeSegmentPattern(segment, routeSegments);
+    const offset = routeSegmentNeedsSideOffset(segment, routeSegments);
+    const points = offset ? offsetRoutePoints(segment.points, segment.style.mapSide) : segment.points;
+    return {
+      ...segment,
+      points,
+      pattern,
+      patternKey: routePatternKey(pattern),
+      offset,
+    };
+  });
+
+  const runs = [];
+  let current = null;
+
+  prepared.forEach((segment) => {
+    if (current && canExtendRouteRun(current, segment)) {
+      current.points.push(segment.points[1]);
+      return;
+    }
+
+    if (current) {
+      runs.push(current);
+    }
+
+    current = {
+      route: segment.route,
+      style: segment.style,
+      line: segment.line,
+      color: segment.color,
+      opacity: segment.opacity,
+      pattern: segment.pattern,
+      patternKey: segment.patternKey,
+      offset: segment.offset,
+      points: [...segment.points],
+    };
+  });
+
+  if (current) {
+    runs.push(current);
+  }
+
+  return runs;
+}
+
+function canExtendRouteRun(run, segment) {
+  if (run.route !== segment.route
+    || run.line !== segment.line
+    || run.style.mapSide !== segment.style.mapSide
+    || run.patternKey !== segment.patternKey
+    || run.offset !== segment.offset) {
+    return false;
+  }
+
+  const last = run.points[run.points.length - 1];
+  const next = segment.points[0];
+  return routePointsTouch(last, next);
+}
+
+function routePatternKey(pattern) {
+  return [
+    pattern.dashArray || '',
+    pattern.dashOffset || '',
+    pattern.lineCap || '',
+    pattern.isAlternating ? 'alt' : 'single',
+  ].join('|');
+}
+
+function routePointsTouch(pointA, pointB) {
+  if (!pointA || !pointB) {
+    return false;
+  }
+
+  if (state.map) {
+    const layerA = state.map.latLngToLayerPoint(L.latLng(pointA[0], pointA[1]));
+    const layerB = state.map.latLngToLayerPoint(L.latLng(pointB[0], pointB[1]));
+    return layerPointDistance(layerA, layerB) <= 8;
+  }
+
+  return distanceMeters(pointA[0], pointA[1], pointB[0], pointB[1]) < 20;
+}
+
+function routeLineSegments(points) {
+  const segments = [];
+  let current = [];
+
+  points.forEach((point) => {
+    const lat = Number(point?.[0]);
+    const lon = Number(point?.[1]);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+      return;
+    }
+
+    const previous = current[current.length - 1];
+    if (previous && distanceMeters(previous[0], previous[1], lat, lon) > ROUTE_MAX_POINT_JUMP_METERS) {
+      if (current.length >= 2) {
+        segments.push(current);
+      }
+      current = [];
+    }
+
+    current.push([lat, lon]);
+  });
+
+  if (current.length >= 2) {
+    segments.push(current);
+  }
+
+  return segments;
+}
+
+function routePhysicalSideStyle(route, routes) {
+  const opposite = closestOppositeRoute(route, routes);
+  if (!opposite) {
+    return routeDirectionStyle(route);
+  }
+
+  const routeCenter = routeScreenCenter(route);
+  const oppositeCenter = routeScreenCenter(opposite);
+  if (Math.abs(routeCenter.y - oppositeCenter.y) <= ROUTE_SIDE_CENTER_EPS_PX) {
+    return routeDirectionStyle(route);
+  }
+
+  return routeCenter.y <= oppositeCenter.y
+    ? ROUTE_SIDE_STYLES.north
+    : ROUTE_SIDE_STYLES.south;
+}
+
+function closestOppositeRoute(route, routes) {
+  const direction = routeDirectionIndex(route) % 2;
+  const center = routeScreenCenter(route);
+  let best = null;
+  let bestDistance = Infinity;
+
+  routes.forEach((candidate) => {
+    if (candidate === route || String(candidate.line) !== String(route.line)) {
+      return;
+    }
+
+    if (routeDirectionIndex(candidate) % 2 === direction) {
+      return;
+    }
+
+    const distance = layerPointDistance(center, routeScreenCenter(candidate));
+    if (distance < bestDistance) {
+      best = candidate;
+      bestDistance = distance;
+    }
+  });
+
+  return best;
+}
+
+function routeSegmentPattern(segment, allSegments) {
+  const peerLines = routeSegmentPeerLines(segment, allSegments);
+  const lineIndex = Math.max(0, peerLines.indexOf(segment.line));
+  const count = Math.max(1, peerLines.length);
+  const isAlternating = count > 1;
+
+  if (segment.style.dashArray) {
+    const step = 13;
+    return isAlternating
+      ? { dashArray: `1 ${Math.max(1, step * count - 1)}`, dashOffset: String(-(lineIndex * step)), lineCap: 'round', isAlternating }
+      : { dashArray: segment.style.dashArray, dashOffset: segment.style.dashOffset, lineCap: 'round', isAlternating };
+  }
+
+  if (isAlternating) {
+    const dash = segment.style.sharedDash || 58;
+    return {
+      dashArray: `${dash} ${Math.max(1, dash * (count - 1))}`,
+      dashOffset: String(-(lineIndex * dash)),
+      lineCap: 'butt',
+      isAlternating,
+    };
+  }
+
+  return { dashArray: null, dashOffset: '0', lineCap: 'round', isAlternating };
+}
+
+function routeSegmentPeerLines(segment, allSegments) {
+  const lines = new Set([segment.line]);
+
+  allSegments.forEach((other) => {
+    if (other === segment || other.style.mapSide !== segment.style.mapSide) {
+      return;
+    }
+
+    if (routeHeadingDifference(segment.heading, other.heading) > ROUTE_SEGMENT_HEADING_TOLERANCE) {
+      return;
+    }
+
+    if (layerPointDistance(segment.midpoint, other.midpoint) <= ROUTE_OVERLAP_DISTANCE_PX) {
+      lines.add(other.line);
+    }
+  });
+
+  return [...lines].sort((a, b) => a.localeCompare(b, 'et', { numeric: true }));
+}
+
+function routeSegmentNeedsSideOffset(segment, allSegments) {
+  return allSegments.some((other) => {
+    return other !== segment
+      && other.line === segment.line
+      && other.direction !== segment.direction
+      && routeHeadingDifference(segment.heading, other.heading) <= ROUTE_SEGMENT_HEADING_TOLERANCE
+      && layerPointDistance(segment.midpoint, other.midpoint) <= ROUTE_SIDE_CENTER_EPS_PX;
+  });
+}
+
+function offsetRouteSegments(segments, mapSide) {
+  if (!state.map) {
+    return segments;
+  }
+
+  return segments
+    .map((segment) => offsetRoutePoints(segment, mapSide))
+    .filter((segment) => segment.length >= 2);
+}
+
+function offsetRoutePoints(points, mapSide) {
+  const layerPoints = points.map((point) => state.map.latLngToLayerPoint(L.latLng(point[0], point[1])));
+
+  return layerPoints.map((point, index) => {
+    const previous = layerPoints[index - 1];
+    const next = layerPoints[index + 1];
+    const normalA = previous ? segmentNormal(previous, point) : null;
+    const normalB = next ? segmentNormal(point, next) : null;
+    const normal = averageNormal(normalA, normalB);
+    const direction = mapSideOffsetDirection(normal, mapSide);
+    const shifted = L.point(
+      point.x + normal.x * ROUTE_SIDE_OFFSET_PX * direction,
+      point.y + normal.y * ROUTE_SIDE_OFFSET_PX * direction,
+    );
+    const latLng = state.map.layerPointToLatLng(shifted);
+    return [latLng.lat, latLng.lng];
+  });
+}
+
+function mapSideOffsetDirection(normal, mapSide) {
+  const wantedY = mapSide === 'north' ? -1 : 1;
+  if (Math.abs(normal.y) < 0.08) {
+    return mapSide === 'north' ? 1 : -1;
+  }
+
+  return wantedY * Math.sign(normal.y);
+}
+
+function segmentNormal(start, end) {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const length = Math.hypot(dx, dy);
+  if (!length) {
+    return { x: 0, y: 0 };
+  }
+
+  return { x: -dy / length, y: dx / length };
+}
+
+function averageNormal(normalA, normalB) {
+  const x = (normalA?.x || 0) + (normalB?.x || 0);
+  const y = (normalA?.y || 0) + (normalB?.y || 0);
+  const length = Math.hypot(x, y);
+  if (length) {
+    return { x: x / length, y: y / length };
+  }
+
+  return normalA || normalB || { x: 0, y: 0 };
+}
+
+function routeScreenCenter(route) {
+  const points = Array.isArray(route.points) ? route.points : [];
+  if (points.length === 0) {
+    return L.point(0, 0);
+  }
+
+  const sampleStep = Math.max(1, Math.floor(points.length / 24));
+  let x = 0;
+  let y = 0;
+  let count = 0;
+
+  for (let index = 0; index < points.length; index += sampleStep) {
+    const point = points[index];
+    const lat = Number(point?.[0]);
+    const lon = Number(point?.[1]);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+      continue;
+    }
+
+    const layerPoint = state.map
+      ? state.map.latLngToLayerPoint(L.latLng(lat, lon))
+      : L.point(lon * 100000, lat * -100000);
+    x += layerPoint.x;
+    y += layerPoint.y;
+    count += 1;
+  }
+
+  return count ? L.point(x / count, y / count) : L.point(0, 0);
+}
+
+function routeSegmentMidpoint(start, end) {
+  const lat = (start[0] + end[0]) / 2;
+  const lon = (start[1] + end[1]) / 2;
+  if (state.map) {
+    return state.map.latLngToLayerPoint(L.latLng(lat, lon));
+  }
+
+  return L.point(lon * 100000, lat * -100000);
+}
+
+function routeOverallHeading(route) {
+  const points = Array.isArray(route.points) ? route.points : [];
+  const start = points.find(normalizeLatLon);
+  const end = [...points].reverse().find(normalizeLatLon);
+  if (!start || !end) {
+    return 0;
+  }
+
+  return routeSegmentHeadingDegrees(start, end);
+}
+
+function normalizeLatLon(point) {
+  const lat = Number(point?.[0]);
+  const lon = Number(point?.[1]);
+  return Number.isFinite(lat) && Number.isFinite(lon) ? [lat, lon] : null;
+}
+
+function routeSegmentHeadingDegrees(start, end) {
+  const lat = (start[0] + end[0]) / 2;
+  const lonMeters = Math.max(25000, 111320 * Math.cos(lat * Math.PI / 180));
+  const dx = (end[1] - start[1]) * lonMeters;
+  const dy = (end[0] - start[0]) * 111320;
+  return (Math.atan2(dy, dx) * 180 / Math.PI + 360) % 180;
+}
+
+function routeHeadingDifference(a, b) {
+  const diff = Math.abs(Number(a) - Number(b)) % 180;
+  return Math.min(diff, 180 - diff);
+}
+
+function layerPointDistance(pointA, pointB) {
+  if (!pointA || !pointB) {
+    return Infinity;
+  }
+
+  return Math.hypot(pointA.x - pointB.x, pointA.y - pointB.y);
+}
+
+function routeGapColor() {
+  return state.theme === 'dark' ? '#1e2a28' : '#ffffff';
+}
+
 function routeDirectionStyle(route) {
-  const directionIndex = routeDirectionIndex(route);
-  return ROUTE_DIRECTION_PATTERNS[directionIndex % ROUTE_DIRECTION_PATTERNS.length];
+  return routeDirectionIndex(route) % 2 === 1
+    ? ROUTE_SIDE_STYLES.north
+    : ROUTE_SIDE_STYLES.south;
 }
 
 function routeDirectionIndex(route) {
@@ -882,13 +1508,19 @@ function renderRouteStops() {
 
 function vehicleIcon(vehicle, risk) {
   const riskClass = risk.level === 'high' ? 'risk-high' : risk.level === 'medium' ? 'risk-medium' : '';
-  const riskLabel = risk.level === 'high' ? 'Kõrge risk' : risk.level === 'medium' ? 'Võimalik viivitus' : '';
-  const riskBadge = riskLabel ? '<span class="vehicle-risk-badge" aria-hidden="true">!</span>' : '';
+  const riskBadge = risk.level === 'high' || risk.level === 'medium'
+    ? '<span class="vehicle-risk-badge" aria-hidden="true">!</span>'
+    : '';
+  const profile = vehicleProfile(vehicle);
+  const typeClass = vehicleTypeClass(profile);
+  const typeBadge = profile.badge
+    ? `<span class="vehicle-type-badge ${typeClass}" title="${escapeHtml(profile.shortLabel)}">${escapeHtml(profile.badge)}</span>`
+    : '';
   const destination = shortText(vehicle.destination || '', 12);
   const color = routeColor(vehicle.line);
   const bearing = Number.isFinite(Number(vehicle.bearing)) ? Number(vehicle.bearing) : 0;
   return L.divIcon({
-    className: `vehicle-marker ${riskClass}`,
+    className: `vehicle-marker ${riskClass} ${typeClass}`,
     html: `
       <div class="vehicle-icon-wrap">
         <div class="vehicle-pin" style="--vehicle-color: ${color}; --bearing: ${bearing}deg;">
@@ -897,11 +1529,11 @@ function vehicleIcon(vehicle, risk) {
           <strong>${escapeHtml(vehicle.line)}</strong>
           ${riskBadge}
         </div>
-        ${riskLabel ? `<span class="vehicle-risk-label">${escapeHtml(riskLabel)}</span>` : ''}
+        ${typeBadge}
         <span class="vehicle-label">${escapeHtml(destination || vehicle.destination || 'Siht teadmata')}</span>
       </div>
     `,
-    iconSize: [112, 96],
+    iconSize: [112, 108],
     iconAnchor: [56, 23],
     popupAnchor: [0, -26],
   });
@@ -927,11 +1559,15 @@ function renderVehicleList() {
     const risk = vehicleDelayRisk(vehicle);
     const riskClass = risk.level === 'high' ? 'risk-high' : risk.level === 'medium' ? 'risk-medium' : '';
     const riskLabel = risk.level === 'high' ? 'Kõrge risk' : risk.level === 'medium' ? 'Võimalik hilinemine' : '';
+    const profile = vehicleProfile(vehicle);
     return `
       <button class="vehicle-row ${riskClass}" type="button" data-vehicle-key="${escapeHtml(vehicleKey(vehicle))}">
         <span class="route-badge compact" style="--badge-color: ${routeColor(vehicle.line)}">${escapeHtml(vehicle.line)}</span>
         <span class="vehicle-row-text">
           <strong>${escapeHtml(vehicle.destination || 'Siht teadmata')}</strong>
+          <span class="vehicle-type-chip ${profile.isElectric ? 'electric' : ''} ${profile.isArticulated ? 'articulated' : ''} ${profile.isKnown ? '' : 'unknown'}">
+            ${escapeHtml(profile.shortLabel)}
+          </span>
           ${riskLabel ? `<span class="vehicle-row-risk">${escapeHtml(riskLabel)}</span>` : ''}
           <small>Sõiduk ${escapeHtml(vehicle.id)} · GPS ${age}</small>
         </span>
@@ -966,6 +1602,8 @@ function vehiclePopup(vehicle, risk) {
   const age = vehicle.ageSeconds === null || vehicle.ageSeconds === undefined ? '-' : `${Math.round(vehicle.ageSeconds)} s`;
   const riskClass = risk.level === 'high' ? 'high' : risk.level === 'medium' ? 'medium' : 'low';
   const riskDetail = risk.detail ? `<small>${escapeHtml(risk.detail)}</small>` : '';
+  const profile = vehicleProfile(vehicle);
+  const fleetInfo = vehicleFleetInfoHtml(profile);
   return `
     <div class="popup-card vehicle-popup-card risk-${riskClass}">
       <div class="vehicle-popup-head">
@@ -979,6 +1617,7 @@ function vehiclePopup(vehicle, risk) {
         <strong>${escapeHtml(risk.label)}</strong>
         ${riskDetail}
       </div>
+      ${fleetInfo}
       <dl>
         <dt>Sõiduk</dt><dd>${escapeHtml(vehicle.id)}</dd>
         <dt>Kiirus</dt><dd>${speed}</dd>
@@ -999,7 +1638,7 @@ async function loadStopPopupDepartures(stop, marker) {
   });
 
   try {
-    const data = await fetchJson(`api.php?${params.toString()}`);
+    const data = await fetchJson(`api.html?${params.toString()}`);
     marker.setPopupContent(stopPopupContent(stop, data.departures || [], false));
     marker.openPopup();
     hydrateIcons();
@@ -1071,7 +1710,7 @@ async function searchStops() {
   const params = new URLSearchParams({ action: 'stops', q: query });
 
   try {
-    const data = await fetchJson(`api.php?${params.toString()}`);
+    const data = await fetchJson(`api.html?${params.toString()}`);
     renderStopResults(data.stops || []);
   } catch (error) {
     renderInlineError(els.stopResults, error.message);
@@ -1134,7 +1773,7 @@ async function fetchDepartures(stop) {
   const params = new URLSearchParams({ action: 'departures', stopid: stop.id });
 
   try {
-    const data = await fetchJson(`api.php?${params.toString()}`);
+    const data = await fetchJson(`api.html?${params.toString()}`);
     state.departures = data.departures || [];
     renderDepartures();
     renderDelayPanel();
@@ -1171,7 +1810,7 @@ function renderDepartures() {
 
 async function loadSchools() {
   try {
-    const data = await fetchJson('api.php?action=schools');
+    const data = await fetchJson('api.html?action=schools');
     state.schools = data.schools || [];
     renderSchools();
     renderDelayPanel();
@@ -1342,6 +1981,11 @@ function distanceMeters(latA, lonA, latB, lonB) {
 }
 
 async function fetchWeather() {
+  const now = Date.now();
+  if (state.lastWeatherFetch && now - state.lastWeatherFetch < WEATHER_REFRESH_MS) {
+    return;
+  }
+  state.lastWeatherFetch = now;
   const url = 'https://api.open-meteo.com/v1/forecast?latitude=59.437&longitude=24.7536&current=temperature_2m,precipitation,weather_code,wind_speed_10m&hourly=precipitation_probability&forecast_days=1&timezone=Europe%2FTallinn';
 
   try {
@@ -1480,6 +2124,145 @@ function vehicleDelayRisk(vehicle) {
   return { level: 'low', score: 1, label: 'Tavaline liikumine', detail: '' };
 }
 
+function vehicleProfile(vehicle) {
+  const id = String(vehicle.id || '').trim();
+  const fleet = state.fleet[id];
+
+  if (!fleet) {
+    return {
+      isKnown: false,
+      isElectric: false,
+      isArticulated: false,
+      badge: '',
+      shortLabel: 'Info puudub',
+      facts: [],
+    };
+  }
+
+  const isElectric = fleet.power === 'electric' || fleet.isElectric === true;
+  const isArticulated = fleet.size === 'articulated' || fleet.isArticulated === true;
+  const sizeLabel = vehicleSizeLabel(fleet);
+  const powerLabel = vehiclePowerLabel(fleet);
+  const facts = vehicleFacts(fleet, sizeLabel, powerLabel);
+
+  return {
+    isKnown: true,
+    isElectric,
+    isArticulated,
+    badge: vehicleTypeBadge(fleet, isElectric, isArticulated),
+    shortLabel: facts.length ? facts.slice(0, 2).map((fact) => fact.label).join(' · ') : 'Info puudub',
+    sizeLabel,
+    powerLabel,
+    facts,
+  };
+}
+
+function vehicleTypeBadge(fleet, isElectric, isArticulated) {
+  if (isElectric) {
+    return 'E';
+  }
+
+  return '';
+}
+
+function vehicleTypeClass(profile) {
+  if (profile.isElectric) {
+    return 'type-electric';
+  }
+
+  if (profile.isArticulated) {
+    return 'type-articulated';
+  }
+
+  return profile.isKnown ? 'type-standard' : 'type-unknown';
+}
+
+function vehicleSizeLabel(fleet) {
+  if (fleet.size === 'articulated') {
+    return 'Pikk buss';
+  }
+
+  if (fleet.size === 'standard') {
+    return 'Lühike buss';
+  }
+
+  return '';
+}
+
+function vehiclePowerLabel(fleet) {
+  if (fleet.power === 'electric') {
+    return 'Elektriga';
+  }
+
+  if (fleet.power === 'hybrid') {
+    return 'Hübriid';
+  }
+
+  if (fleet.power === 'cng') {
+    return 'Gaasiga';
+  }
+
+  if (fleet.power === 'diesel') {
+    return 'Kütusega';
+  }
+
+  return '';
+}
+
+function vehicleFacts(fleet, sizeLabel, powerLabel) {
+  const facts = [];
+
+  if (sizeLabel) {
+    facts.push({ icon: 'ruler', label: sizeLabel });
+  }
+
+  if (powerLabel) {
+    facts.push({ icon: vehiclePowerIcon(fleet.power), label: powerLabel });
+  }
+
+  return facts;
+}
+
+function vehiclePowerIcon(power) {
+  if (power === 'electric') {
+    return 'zap';
+  }
+
+  if (power === 'hybrid') {
+    return 'leaf';
+  }
+
+  if (power === 'cng') {
+    return 'zap';
+  }
+
+  return 'fuel';
+}
+
+function vehicleFleetInfoHtml(profile) {
+  if (!profile.isKnown || profile.facts.length === 0) {
+    return `
+      <div class="vehicle-facts is-missing">
+        <span class="vehicle-fact">
+          <i data-lucide="info"></i>
+          <strong>Info puudub</strong>
+        </span>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="vehicle-facts">
+      ${profile.facts.map((fact) => `
+        <span class="vehicle-fact">
+          <i data-lucide="${escapeHtml(fact.icon)}"></i>
+          <strong>${escapeHtml(fact.label)}</strong>
+        </span>
+      `).join('')}
+    </div>
+  `;
+}
+
 function renderLineTags() {
   if (state.selectedLines.length === 0) {
     els.selectedLines.innerHTML = '<span class="empty-tag">Ühtegi liini pole valitud</span>';
@@ -1489,15 +2272,26 @@ function renderLineTags() {
   els.selectedLines.innerHTML = state.selectedLines.map((line) => {
     const color = routeColor(line);
     const emphasis = Math.round(lineEmphasis(line) * 100);
+    const sliderShellStyle = lineSliderShellStyle(color, emphasis);
+    const sliderInputStyle = lineSliderInputStyle(color, emphasis);
+    const sliderTrackStyle = lineSliderTrackStyle(color);
+    const sliderFillStyle = lineSliderFillStyle(color, emphasis);
+    const sliderThumbStyle = lineSliderThumbStyle(color, emphasis);
     return `
-      <div class="line-control-row" data-line="${escapeHtml(line)}" style="--line-color: ${color}">
+      <div class="line-control-row" data-line="${escapeHtml(line)}" style="--line-color: ${color}; --line-emphasis: ${emphasis}%">
         <label class="line-color-picker" title="Muuda liini ${escapeHtml(line)} värvi">
           <span class="route-badge compact" style="--badge-color: ${color}">${escapeHtml(line)}</span>
           <input class="line-color-input" type="color" value="${escapeHtml(color)}" data-line="${escapeHtml(line)}" aria-label="Vali liini ${escapeHtml(line)} värv">
         </label>
         <label class="line-opacity-control">
           <span>Nähtavus</span>
-          <input class="line-emphasis-input" type="range" min="0" max="100" step="5" value="${emphasis}" data-line="${escapeHtml(line)}" aria-label="Muuda liini ${escapeHtml(line)} nähtavust">
+          <span class="line-slider-shell" style="${escapeHtml(sliderShellStyle)}">
+            <input class="line-emphasis-input" type="range" min="0" max="100" step="5" value="${emphasis}" data-line="${escapeHtml(line)}" style="${escapeHtml(sliderInputStyle)}" aria-label="Muuda liini ${escapeHtml(line)} nähtavust">
+            <span class="line-slider-track" style="${escapeHtml(sliderTrackStyle)}" aria-hidden="true">
+              <span class="line-slider-fill" style="${escapeHtml(sliderFillStyle)}"></span>
+            </span>
+            <span class="line-slider-thumb" style="${escapeHtml(sliderThumbStyle)}" aria-hidden="true"></span>
+          </span>
         </label>
         <strong class="line-emphasis-value" data-line="${escapeHtml(line)}">${emphasis}%</strong>
         <button class="line-remove" type="button" data-line="${escapeHtml(line)}" title="Eemalda liin ${escapeHtml(line)}" aria-label="Eemalda liin ${escapeHtml(line)}">
@@ -1553,6 +2347,10 @@ function syncLineColorControls(line, color) {
       element.style.setProperty('--line-color', color);
     }
 
+    if (element.classList.contains('line-emphasis-input')) {
+      applyLineSliderStyle(element, color, Number(element.value));
+    }
+
     if (element.matches('input[type="color"]')) {
       element.value = color;
       const row = element.closest('.line-control-row');
@@ -1583,9 +2381,58 @@ function updateLineEmphasis(input) {
 
 function syncLineEmphasisControls(line, emphasis) {
   const percent = `${Math.round(emphasis * 100)}%`;
+  document.querySelectorAll(`.line-control-row[data-line="${cssString(line)}"]`).forEach((element) => {
+    element.style.setProperty('--line-emphasis', percent);
+  });
+  document.querySelectorAll(`.line-emphasis-input[data-line="${cssString(line)}"]`).forEach((input) => {
+    const value = Math.round(emphasis * 100);
+    input.value = String(value);
+    applyLineSliderStyle(input, routeColor(line), value);
+  });
   document.querySelectorAll(`.line-emphasis-value[data-line="${cssString(line)}"]`).forEach((element) => {
     element.textContent = percent;
   });
+}
+
+function applyLineSliderStyle(input, color, value) {
+  const sliderColor = isHexColor(color) ? color : routeColor(input.dataset.line || '');
+  const percent = clampNumber(Number(value), 0, 100);
+  const shell = input.closest('.line-slider-shell');
+  shell?.setAttribute('style', lineSliderShellStyle(sliderColor, percent));
+  input.setAttribute('style', lineSliderInputStyle(sliderColor, percent));
+  shell?.querySelector('.line-slider-track')?.setAttribute('style', lineSliderTrackStyle(sliderColor));
+  shell?.querySelector('.line-slider-fill')?.setAttribute('style', lineSliderFillStyle(sliderColor, percent));
+  shell?.querySelector('.line-slider-thumb')?.setAttribute('style', lineSliderThumbStyle(sliderColor, percent));
+}
+
+function lineSliderVariables(color, value) {
+  const sliderColor = isHexColor(color) ? color : '#0f766e';
+  const percent = clampNumber(Number(value), 0, 100);
+  return `--line-color: ${sliderColor}; --line-emphasis: ${percent}%;`;
+}
+
+function lineSliderShellStyle(color, value) {
+  return `${lineSliderVariables(color, value)} position: relative; width: 100%; min-width: 0; height: 22px; display: block;`;
+}
+
+function lineSliderInputStyle(color, value) {
+  return `${lineSliderVariables(color, value)} position: absolute; inset: 0; z-index: 3; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; background: transparent; border: 0; border-radius: 999px; outline: none; -webkit-appearance: none; appearance: none;`;
+}
+
+function lineSliderTrackStyle(color) {
+  return 'position: absolute; left: 0; right: 0; top: 50%; z-index: 1; height: 6px; overflow: hidden; box-sizing: border-box; border: 1px solid rgba(15, 23, 42, 0.24); border-radius: 999px; background: #ffffff; transform: translateY(-50%);';
+}
+
+function lineSliderFillStyle(color, value) {
+  const sliderColor = isHexColor(color) ? color : '#0f766e';
+  const percent = clampNumber(Number(value), 0, 100);
+  return `width: ${percent}%; height: 100%; display: block; border-radius: inherit; background: ${sliderColor};`;
+}
+
+function lineSliderThumbStyle(color, value) {
+  const sliderColor = isHexColor(color) ? color : '#0f766e';
+  const percent = clampNumber(Number(value), 0, 100);
+  return `position: absolute; left: clamp(8px, ${percent}%, calc(100% - 8px)); top: 50%; z-index: 2; width: 16px; height: 16px; border: 2px solid #ffffff; border-radius: 999px; background: ${sliderColor}; box-shadow: 0 2px 7px rgba(18, 34, 31, 0.26); pointer-events: none; transform: translate(-50%, -50%);`;
 }
 
 function refreshColoredLayers(renderControls = true) {
@@ -1601,6 +2448,7 @@ function refreshColoredLayers(renderControls = true) {
 
 function refreshLineEmphasis() {
   renderRoutes();
+  renderMapStops();
   renderVehicles();
 }
 
@@ -1625,6 +2473,10 @@ function locateUser() {
 }
 
 async function fetchJson(url, options = {}) {
+  if (window.BussRadarApi?.canHandle?.(url)) {
+    return window.BussRadarApi.request(url, options);
+  }
+
   const response = await fetch(url, {
     ...options,
     cache: 'no-store',
