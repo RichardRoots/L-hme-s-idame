@@ -1,14 +1,20 @@
-const CACHE_NAME = 'bussradar-v139';
+const CACHE_NAME = 'bussradar-v166';
 const APP_SHELL = [
   './',
   './index.html',
+  './reset.html',
   './login.html',
   './api.html',
-  './assets/css/styles.css?v=139',
-  './assets/js/static-api.js?v=139',
-  './assets/js/app.js?v=139',
-  './assets/js/auth.js?v=139',
+  './assets/css/styles.css?v=166',
+  './assets/js/static-api.js?v=166',
+  './assets/js/app.js?v=166',
+  './assets/js/auth.js?v=166',
   './assets/icon.svg',
+  './assets/favicon-32.png',
+  './assets/icon-192.png',
+  './assets/icon-512.png',
+  './assets/maskable-icon-512.png',
+  './assets/apple-touch-icon.png',
   './data/schools.json',
   './data/fleet.json',
   './manifest.json'
@@ -30,6 +36,12 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});
+
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
@@ -39,6 +51,24 @@ self.addEventListener('fetch', (event) => {
   }
 
   if (event.request.method !== 'GET') {
+    return;
+  }
+
+  const isFreshAsset = url.origin === self.location.origin
+    && /\.(?:js|css)$/i.test(url.pathname);
+
+  if (isFreshAsset) {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          if (response && response.status === 200) {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          }
+          return response;
+        })
+        .catch(() => caches.match(event.request))
+    );
     return;
   }
 

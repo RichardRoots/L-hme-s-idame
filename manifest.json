@@ -2,17 +2,53 @@
   "name": "BussRadar Tallinn",
   "short_name": "BussRadar",
   "description": "Tallinna busside live-kaart, peatuste väljumised, ilm ja koolide liikumisvood.",
-  "start_url": "index.html",
+  "id": "./",
+  "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
   "background_color": "#eef3f0",
   "theme_color": "#0f5e62",
+  "lang": "et",
+  "orientation": "any",
+  "categories": ["navigation", "travel", "utilities"],
   "icons": [
+    {
+      "src": "assets/favicon-32.png",
+      "sizes": "32x32",
+      "type": "image/png"
+    },
+    {
+      "src": "assets/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "assets/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "assets/maskable-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
     {
       "src": "assets/icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Ava kaart",
+      "short_name": "Kaart",
+      "url": "./index.html",
+      "icons": [{ "src": "assets/icon-192.png", "sizes": "192x192" }]
     }
   ]
 }

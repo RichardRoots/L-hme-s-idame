@@ -5,6 +5,10 @@ const REFRESH_SECONDS = 10;
 const WEATHER_REFRESH_MS = 10 * 60 * 1000;
 const GPS_REFRESH_MS = 5000;
 const THEME_KEY = 'bussradar.theme';
+const ONBOARDING_KEY = 'bussradar.onboardingSeen.v1';
+const TRANSFER_STOP_KEY = 'bussradar.transferStop';
+const TRANSFER_TARGET_LINE_KEY = 'bussradar.transferTargetLine';
+const TRANSFER_WALK_BUFFER_MINUTES = 2;
 const ROUTE_SIDE_STYLES = {
   south: { label: 'Lõuna pool', dashArray: null, dashOffset: '0', weight: 5, mapSide: 'south', priority: 0, sharedDash: 58, sharedGap: 0 },
   north: { label: 'Soome pool', dashArray: '1 13', dashOffset: '0', weight: 5, mapSide: 'north', priority: 1, sharedDash: 1, sharedGap: 13 },
@@ -28,6 +32,7 @@ const state = {
   schoolLayer: null,
   stopLayer: null,
   scheduleStopHighlightLayer: null,
+  transferStopLayer: null,
   favoriteStopLayer: null,
   vehicleMarkers: new Map(),
   mapStopMarkers: new Map(),
@@ -51,6 +56,18 @@ const state = {
   mapStops: [],
   departures: [],
   delayScheduleRoutes: new Map(),
+  transfer: {
+    currentVehicleKey: '',
+    targetVehicleKey: '',
+    targetLine: loadTransferTargetLine(),
+    targetDepartureKey: '',
+    stop: loadTransferStop(),
+    departures: [],
+    loadingDepartures: false,
+    departureError: '',
+    departureRequestId: 0,
+    popupExpanded: false,
+  },
   schools: [],
   schoolsVisible: false,
   shouldFitVehicles: true,
@@ -69,6 +86,11 @@ const state = {
   userLocationTimer: null,
   userLocationActive: false,
   userLocationPending: false,
+  onboarding: {
+    active: false,
+    index: 0,
+    steps: [],
+  },
 };
 
 const els = {};
@@ -84,6 +106,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadFleetData();
   loadInitialData();
   lucide.createIcons();
+  queueFirstVisitOnboarding();
 });
 
 function cacheElements() {
@@ -97,6 +120,7 @@ function cacheElements() {
   els.vehicleList = document.querySelector('#vehicleList');
   els.refreshButton = document.querySelector('#refreshButton');
   els.locateButton = document.querySelector('#locateButton');
+  els.helpButton = document.querySelector('#helpButton');
   els.installButton = document.querySelector('#installButton');
   els.themeToggle = document.querySelector('#themeToggle');
   els.accountLink = document.querySelector('#accountLink');
@@ -113,6 +137,16 @@ function cacheElements() {
   els.stopResults = document.querySelector('#stopResults');
   els.selectedStopName = document.querySelector('#selectedStopName');
   els.departures = document.querySelector('#departures');
+  els.transferSummary = document.querySelector('#transferSummary');
+  els.transferCurrentVehicle = document.querySelector('#transferCurrentVehicle');
+  els.transferStopForm = document.querySelector('#transferStopForm');
+  els.transferStopSearch = document.querySelector('#transferStopSearch');
+  els.transferStopResults = document.querySelector('#transferStopResults');
+  els.transferTargetVehicle = document.querySelector('#transferTargetVehicle');
+  els.transferTargetLine = document.querySelector('#transferTargetLine');
+  els.transferTargetDeparture = document.querySelector('#transferTargetDeparture');
+  els.transferCalculate = document.querySelector('#transferCalculate');
+  els.transferResult = document.querySelector('#transferResult');
   els.scheduleForm = document.querySelector('#scheduleForm');
   els.scheduleLineSelect = document.querySelector('#scheduleLineSelect');
   els.scheduleDirectionSelect = document.querySelector('#scheduleDirectionSelect');
@@ -153,6 +187,7 @@ function createMap() {
   state.map.createPane('mapStopPane');
   state.map.createPane('stopPane');
   state.map.createPane('scheduleStopPane');
+  state.map.createPane('transferStopPane');
   state.map.createPane('favoriteStopPane');
   state.map.createPane('vehiclePane');
   state.map.getPane('routePane').style.zIndex = 405;
@@ -160,6 +195,7 @@ function createMap() {
   state.map.getPane('mapStopPane').style.zIndex = 500;
   state.map.getPane('stopPane').style.zIndex = 520;
   state.map.getPane('scheduleStopPane').style.zIndex = 585;
+  state.map.getPane('transferStopPane').style.zIndex = 595;
   state.map.getPane('favoriteStopPane').style.zIndex = 560;
   state.map.getPane('vehiclePane').style.zIndex = 690;
 
@@ -168,6 +204,7 @@ function createMap() {
   state.mapStopLayer = L.layerGroup().addTo(state.map);
   state.stopLayer = L.layerGroup().addTo(state.map);
   state.scheduleStopHighlightLayer = L.layerGroup().addTo(state.map);
+  state.transferStopLayer = L.layerGroup().addTo(state.map);
   state.favoriteStopLayer = L.layerGroup().addTo(state.map);
   state.vehicleLayer = L.layerGroup().addTo(state.map);
 
@@ -475,6 +512,10 @@ function bindEvents() {
     setTheme(state.theme === 'dark' ? 'light' : 'dark');
   });
 
+  els.helpButton?.addEventListener('click', () => {
+    startOnboarding({ force: true });
+  });
+
   els.lineForm.addEventListener('submit', (event) => {
     event.preventDefault();
     const value = normalizeLine(els.lineInput.value);
@@ -518,6 +559,33 @@ function bindEvents() {
     searchStops();
   });
 
+  els.transferCurrentVehicle?.addEventListener('change', () => {
+    setTransferCurrentVehicle(els.transferCurrentVehicle.value);
+  });
+
+  els.transferStopForm?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    searchTransferStops();
+  });
+
+  els.transferTargetVehicle?.addEventListener('change', () => {
+    setTransferTargetVehicle(els.transferTargetVehicle.value);
+  });
+
+  els.transferTargetLine?.addEventListener('input', () => {
+    setTransferTargetLine(els.transferTargetLine.value);
+  });
+
+  els.transferTargetDeparture?.addEventListener('change', () => {
+    state.transfer.targetDepartureKey = els.transferTargetDeparture.value;
+    updateTransferResult();
+    refreshVehiclePopupContents();
+  });
+
+  els.transferCalculate?.addEventListener('click', () => {
+    refreshTransferEstimate();
+  });
+
   els.scheduleForm?.addEventListener('submit', (event) => {
     event.preventDefault();
     selectScheduleLine(els.scheduleLineSelect?.value || state.scheduleLine);
@@ -537,10 +605,33 @@ function bindEvents() {
   });
 
   document.addEventListener('click', handleFavoritePopupClick);
+  document.addEventListener('click', handleTransferActionClick);
+  document.addEventListener('click', handleInstallHelpClick);
+  document.addEventListener('click', handleOnboardingClick);
 
   document.addEventListener('keydown', (event) => {
+    if (state.onboarding.active) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        completeOnboarding();
+        return;
+      }
+      if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        nextOnboardingStep();
+        return;
+      }
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        previousOnboardingStep();
+        return;
+      }
+    }
     if (event.key === 'Escape' && els.schedulePanel?.classList.contains('is-open')) {
       setSchedulePanelOpen(false);
+    }
+    if (event.key === 'Escape') {
+      hideInstallHelp();
     }
   });
 
@@ -555,23 +646,35 @@ function bindEvents() {
     els.toggleSchools.classList.toggle('muted', !state.schoolsVisible);
   });
 
-  els.installButton.addEventListener('click', async () => {
-    if (!state.deferredInstallPrompt) return;
-    state.deferredInstallPrompt.prompt();
-    await state.deferredInstallPrompt.userChoice;
-    state.deferredInstallPrompt = null;
-    els.installButton.hidden = true;
+  els.installButton?.addEventListener('click', async () => {
+    if (state.deferredInstallPrompt) {
+      state.deferredInstallPrompt.prompt();
+      await state.deferredInstallPrompt.userChoice;
+      state.deferredInstallPrompt = null;
+      updateInstallButtonVisibility();
+      return;
+    }
+
+    showInstallHelp();
   });
 
   window.addEventListener('beforeinstallprompt', (event) => {
     event.preventDefault();
     state.deferredInstallPrompt = event;
-    els.installButton.hidden = false;
+    updateInstallButtonVisibility();
   });
+
+  window.addEventListener('appinstalled', () => {
+    state.deferredInstallPrompt = null;
+    updateInstallButtonVisibility();
+  });
+
+  window.setTimeout(updateInstallButtonVisibility, 700);
 
   window.addEventListener('resize', () => {
     clampSchedulePanelHeight();
     clampSidePanelHeight();
+    positionOnboarding();
     window.setTimeout(() => state.map?.invalidateSize({ animate: false }), 120);
   });
 }
@@ -735,7 +838,7 @@ function setTheme(theme, shouldSave = true) {
 function applyTheme(theme) {
   const normalizedTheme = theme === 'dark' ? 'dark' : 'light';
   document.documentElement.dataset.theme = normalizedTheme;
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', normalizedTheme === 'dark' ? '#101a18' : '#0f5e62');
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', normalizedTheme === 'dark' ? '#0b0f14' : '#0f5e62');
   setMapTileTheme(normalizedTheme);
   if (state.routeLayer && state.routes.length > 0) {
     renderRoutes();
@@ -757,7 +860,7 @@ function applyTheme(theme) {
 function mapTileUrl(theme) {
   return theme === 'dark'
     ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-    : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+    : 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
 }
 
 function setMapTileTheme(theme) {
@@ -773,6 +876,7 @@ function loadInitialData() {
   els.toggleSchools.classList.toggle('muted', !state.schoolsVisible);
   placeStopMarker(state.selectedStop);
   renderFavoriteStops();
+  renderTransferPanel();
   renderScheduleLineOptions();
   fetchScheduleLines();
   fetchSchedule();
@@ -810,6 +914,7 @@ async function refreshAll() {
   await Promise.allSettled([
     fetchVehicles(),
     fetchDepartures(state.selectedStop),
+    state.transfer.stop ? fetchTransferDepartures(state.transfer.stop, { silent: true }) : Promise.resolve(),
     fetchWeather(),
   ]);
 
@@ -956,6 +1061,9 @@ function renderVehicles() {
 
   els.vehicleCount.textContent = `${activeKeys.size} kaardil`;
   renderVehicleList();
+  renderTransferVehicleOptions('current');
+  renderTransferVehicleOptions('target');
+  updateTransferResult();
 
   if (state.vehicles.length > 0 && state.shouldFitVehicles) {
     const bounds = L.latLngBounds(state.vehicles.map((vehicle) => [vehicle.lat, vehicle.lon]));
@@ -1340,6 +1448,1431 @@ function decodeFavoriteStop(value) {
   }
 }
 
+function renderTransferPanel() {
+  if (els.transferTargetLine) {
+    els.transferTargetLine.value = state.transfer.targetLine || '';
+  }
+
+  renderTransferVehicleOptions('current');
+  renderTransferVehicleOptions('target');
+  placeTransferStopMarker(state.transfer.stop);
+  renderTransferDepartures();
+  updateTransferResult();
+
+  if (state.transfer.stop) {
+    fetchTransferDepartures(state.transfer.stop, { silent: true });
+  }
+}
+
+function renderTransferVehicleOptions(kind = 'current') {
+  const select = kind === 'target' ? els.transferTargetVehicle : els.transferCurrentVehicle;
+  if (!select) {
+    return;
+  }
+
+  const vehicles = transferVehicleOptions();
+  const selectedKey = kind === 'target' ? state.transfer.targetVehicleKey : state.transfer.currentVehicleKey;
+  const selectedExists = vehicles.some((vehicle) => vehicleKey(vehicle) === selectedKey);
+  const placeholder = kind === 'target' ? 'Vali sihtbuss' : 'Vali praegune buss';
+  const staleOption = selectedKey && !selectedExists
+    ? `<option value="${escapeHtml(selectedKey)}">Valitud buss pole kaardil</option>`
+    : '';
+
+  select.innerHTML = [
+    `<option value="">${placeholder}</option>`,
+    staleOption,
+    ...vehicles.map((vehicle) => {
+      const key = vehicleKey(vehicle);
+      return `<option value="${escapeHtml(key)}">${escapeHtml(transferVehicleLabel(vehicle))}</option>`;
+    }),
+  ].filter(Boolean).join('');
+  select.value = selectedKey || '';
+}
+
+function transferVehicleOptions() {
+  return [...state.vehicles]
+    .filter(isVehicleCoordinate)
+    .sort((a, b) => {
+      return String(a.line).localeCompare(String(b.line), 'et', { numeric: true })
+        || String(a.destination || '').localeCompare(String(b.destination || ''), 'et')
+        || String(a.id || '').localeCompare(String(b.id || ''), 'et', { numeric: true });
+    });
+}
+
+function transferVehicleLabel(vehicle) {
+  const destination = vehicle.destination ? ` · ${vehicle.destination}` : '';
+  return `${vehicle.line}${destination} · sõiduk ${vehicle.id}`;
+}
+
+function setTransferCurrentVehicle(key) {
+  state.transfer.currentVehicleKey = String(key || '');
+  renderTransferVehicleOptions('current');
+  const vehicle = selectedTransferVehicle();
+  if (vehicle) {
+    ensureDelaySchedules([vehicle.line]).then(() => {
+      updateTransferResult();
+      refreshVehiclePopupContents();
+    });
+  }
+  updateTransferResult();
+  refreshVehiclePopupContents();
+}
+
+function setTransferTargetVehicle(key) {
+  state.transfer.targetVehicleKey = String(key || '');
+  const vehicle = selectedTransferTargetVehicle();
+  if (vehicle) {
+    state.transfer.targetLine = normalizeLine(vehicle.line || '');
+    saveTransferTargetLine();
+    if (els.transferTargetLine) {
+      els.transferTargetLine.value = state.transfer.targetLine;
+    }
+    ensureDelaySchedules([vehicle.line]).then(() => {
+      updateTransferResult();
+      refreshVehiclePopupContents();
+    });
+  }
+
+  chooseTransferDefaultDeparture();
+  renderTransferVehicleOptions('target');
+  renderTransferDepartures();
+  updateTransferResult();
+  refreshVehiclePopupContents();
+}
+
+function setTransferTargetLine(value) {
+  const line = normalizeLine(String(value || ''));
+  state.transfer.targetLine = line;
+  state.transfer.targetVehicleKey = '';
+  saveTransferTargetLine();
+  if (els.transferTargetLine && els.transferTargetLine.value !== line) {
+    els.transferTargetLine.value = line;
+  }
+  renderTransferVehicleOptions('target');
+  chooseTransferDefaultDeparture();
+  renderTransferDepartures();
+  updateTransferResult();
+  refreshVehiclePopupContents();
+}
+
+function resetTransferSelection() {
+  state.transfer.currentVehicleKey = '';
+  state.transfer.targetVehicleKey = '';
+  state.transfer.targetLine = '';
+  state.transfer.targetDepartureKey = '';
+  state.transfer.stop = null;
+  state.transfer.departures = [];
+  state.transfer.loadingDepartures = false;
+  state.transfer.departureError = '';
+  state.transfer.departureRequestId += 1;
+
+  try {
+    localStorage.removeItem(TRANSFER_STOP_KEY);
+    localStorage.removeItem(TRANSFER_TARGET_LINE_KEY);
+  } catch {
+    // Ignore storage failures; the live UI state is still reset.
+  }
+
+  if (els.transferTargetLine) {
+    els.transferTargetLine.value = '';
+  }
+  if (els.transferStopSearch) {
+    els.transferStopSearch.value = '';
+  }
+  if (els.transferStopResults) {
+    els.transferStopResults.innerHTML = '';
+  }
+
+  state.transferStopLayer?.clearLayers();
+  renderTransferVehicleOptions('current');
+  renderTransferVehicleOptions('target');
+  renderTransferDepartures();
+  updateTransferResult();
+  refreshVehiclePopupContents();
+}
+
+async function searchTransferStops() {
+  const query = els.transferStopSearch?.value.trim() || '';
+  if (query.length < 2) {
+    if (els.transferStopResults) {
+      els.transferStopResults.innerHTML = '';
+    }
+    return;
+  }
+
+  els.transferStopResults.innerHTML = '<div class="empty-state">Otsin...</div>';
+  const params = new URLSearchParams({ action: 'stops', q: query });
+
+  try {
+    const data = await fetchJson(`api.html?${params.toString()}`);
+    renderTransferStopResults(data.stops || []);
+  } catch (error) {
+    renderInlineError(els.transferStopResults, error.message);
+  }
+}
+
+function renderTransferStopResults(stops) {
+  if (!els.transferStopResults) {
+    return;
+  }
+
+  if (stops.length === 0) {
+    els.transferStopResults.innerHTML = '<div class="empty-state">Peatust ei leitud</div>';
+    return;
+  }
+
+  els.transferStopResults.innerHTML = stops.slice(0, 8).map((stop, index) => `
+    <button class="stop-result" type="button" data-transfer-stop-index="${index}">
+      <strong>${escapeHtml(stop.name)}</strong>
+      <span>${escapeHtml(stop.street || `ID ${stop.id}`)}</span>
+    </button>
+  `).join('');
+
+  els.transferStopResults.querySelectorAll('[data-transfer-stop-index]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const stop = stops[Number(button.dataset.transferStopIndex || 0)];
+      if (stop) {
+        setTransferStop(stop);
+      }
+    });
+  });
+}
+
+function updateInstallButtonVisibility() {
+  if (!els.installButton) {
+    return;
+  }
+
+  els.installButton.hidden = isInstalledApp() || (!state.deferredInstallPrompt && !isInstallHelpUseful());
+}
+
+function isInstalledApp() {
+  return window.matchMedia?.('(display-mode: standalone)').matches || navigator.standalone === true;
+}
+
+function isInstallHelpUseful() {
+  return isAppleMobile() || isMobileDevice();
+}
+
+function isAppleMobile() {
+  const ua = navigator.userAgent || '';
+  return /iPhone|iPad|iPod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
+function isMobileDevice() {
+  return Boolean(navigator.userAgentData?.mobile) || /Android|webOS|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '');
+}
+
+function showInstallHelp() {
+  const apple = isAppleMobile();
+  const steps = apple
+    ? [
+      { icon: 'share', title: 'Ava jagamise menüü', body: 'Vajuta Safari alumisel ribal jagamise ikooni.' },
+      { icon: 'plus', title: 'Lisa avakuvale', body: 'Vali “Lisa avakuvale” ja kinnita “Lisa”.' },
+    ]
+    : [
+      { icon: 'ellipsis-vertical', title: 'Ava brauseri menüü', body: 'Vali “Installi rakendus” või “Lisa avakuvale”.' },
+      { icon: 'check-circle-2', title: 'Kinnita paigaldus', body: 'Pärast kinnitamist avaneb BussRadar eraldi rakendusena.' },
+    ];
+
+  let panel = document.querySelector('#installHelp');
+  if (!panel) {
+    document.body.insertAdjacentHTML('beforeend', `
+      <div class="install-help" id="installHelp" hidden>
+        <div class="install-help-card" role="dialog" aria-modal="true" aria-labelledby="installHelpTitle">
+          <div class="install-help-head">
+            <span>
+              <strong id="installHelpTitle">Paigalda BussRadar</strong>
+              <small>${apple ? 'iPhone ja iPad' : 'Telefon või tahvel'}</small>
+            </span>
+            <button class="icon-button small" type="button" data-install-help-close aria-label="Sulge paigaldusjuhis">
+              <i data-lucide="x"></i>
+            </button>
+          </div>
+          <div class="install-help-steps">
+            ${steps.map((step) => `
+              <article class="install-help-step">
+                <i data-lucide="${escapeHtml(step.icon)}"></i>
+                <span>
+                  <strong>${escapeHtml(step.title)}</strong>
+                  <small>${escapeHtml(step.body)}</small>
+                </span>
+              </article>
+            `).join('')}
+          </div>
+        </div>
+      </div>
+    `);
+    panel = document.querySelector('#installHelp');
+  }
+
+  panel.hidden = false;
+  document.body.classList.add('install-help-open');
+  hydrateIcons();
+}
+
+function hideInstallHelp() {
+  document.querySelector('#installHelp')?.setAttribute('hidden', '');
+  document.body.classList.remove('install-help-open');
+}
+
+function handleInstallHelpClick(event) {
+  const panel = document.querySelector('#installHelp');
+  if (!panel || panel.hidden) {
+    return;
+  }
+
+  if (event.target === panel || event.target.closest('[data-install-help-close]')) {
+    hideInstallHelp();
+  }
+}
+
+function queueFirstVisitOnboarding() {
+  if (hasSeenOnboarding()) {
+    return;
+  }
+
+  window.setTimeout(() => startOnboarding(), 900);
+}
+
+function hasSeenOnboarding() {
+  try {
+    return localStorage.getItem(ONBOARDING_KEY) === 'done';
+  } catch (error) {
+    return false;
+  }
+}
+
+function markOnboardingSeen() {
+  try {
+    localStorage.setItem(ONBOARDING_KEY, 'done');
+  } catch (error) {
+    // Private browsing can block localStorage; the tour still works without saving.
+  }
+}
+
+function onboardingSteps() {
+  return [
+    {
+      selector: '#map',
+      icon: 'map',
+      title: 'Kaart',
+      body: 'Siin näed busse, teekondi ja peatuseid. Vajuta bussile või peatusele, et avada täpsem info.',
+    },
+    {
+      selector: '#lineForm',
+      icon: 'list-plus',
+      title: 'Lisa liin',
+      body: 'Sisesta liininumber ja lisa see kaardile. Valitud liinide värve ja nähtavust saad hiljem samas paneelis muuta.',
+    },
+    {
+      selector: '#scheduleToggle',
+      icon: 'calendar-days',
+      title: 'Sõiduplaan',
+      body: 'Ava siit valitud liini sõiduplaan, suunad, peatused ja lähimad väljumised.',
+    },
+    {
+      selector: '#stopSearchForm',
+      icon: 'search',
+      title: 'Peatuse otsing',
+      body: 'Otsi peatust nime järgi, et näha lähiväljumisi. Peatuse aknast saad määrata ka ümberistumise peatuse.',
+    },
+    {
+      selector: '#locateButton',
+      icon: 'crosshair',
+      title: 'Minu asukoht',
+      body: 'Näitab sinu asukohta kaardil, kui brauser lubab asukoha kasutamist.',
+    },
+    {
+      selector: '#themeToggle',
+      icon: 'moon',
+      title: 'Hele ja tume režiim',
+      body: 'Vaheta kaardi ja paneelide välimust heleda ning tumeda režiimi vahel.',
+    },
+    {
+      selector: '#refreshButton',
+      icon: 'refresh-cw',
+      title: 'Värskenda',
+      body: 'Uuendab busside asukohad, hilinemised ja väljumised käsitsi kohe ära.',
+    },
+    {
+      selector: '#helpButton',
+      icon: 'circle-help',
+      title: 'Õpetus',
+      body: 'Selle nupuga saad sama juhendi hiljem uuesti avada.',
+    },
+  ];
+}
+
+function startOnboarding({ force = false } = {}) {
+  if (state.onboarding.active) {
+    return;
+  }
+  if (!force && hasSeenOnboarding()) {
+    return;
+  }
+
+  hideInstallHelp();
+  setSchedulePanelOpen(false);
+  state.onboarding.steps = onboardingSteps().filter((step) => document.querySelector(step.selector));
+  if (!state.onboarding.steps.length) {
+    return;
+  }
+
+  state.onboarding.active = true;
+  state.onboarding.index = 0;
+  ensureOnboardingPanel();
+  document.body.classList.add('onboarding-open');
+  updateOnboarding();
+}
+
+function ensureOnboardingPanel() {
+  if (document.querySelector('#onboarding')) {
+    return;
+  }
+
+  document.body.insertAdjacentHTML('beforeend', `
+    <div class="onboarding" id="onboarding" hidden>
+      <div class="onboarding-scrim" data-onboarding-close></div>
+      <div class="onboarding-highlight" aria-hidden="true"></div>
+      <section class="onboarding-card" role="dialog" aria-modal="true" aria-labelledby="onboardingTitle" aria-describedby="onboardingBody">
+        <div class="onboarding-card-head">
+          <span class="onboarding-step-icon" id="onboardingStepIcon"></span>
+          <span>
+            <strong id="onboardingTitle"></strong>
+            <small id="onboardingProgress"></small>
+          </span>
+          <button class="icon-button small" type="button" data-onboarding-close aria-label="Sulge õpetus">
+            <i data-lucide="x"></i>
+          </button>
+        </div>
+        <p id="onboardingBody"></p>
+        <div class="onboarding-actions">
+          <button class="tool-button secondary" type="button" data-onboarding-skip>Jäta vahele</button>
+          <span>
+            <button class="icon-button small" type="button" data-onboarding-prev aria-label="Eelmine samm">
+              <i data-lucide="arrow-left"></i>
+            </button>
+            <button class="tool-button" type="button" data-onboarding-next>
+              <span>Edasi</span>
+              <i data-lucide="arrow-right"></i>
+            </button>
+          </span>
+        </div>
+      </section>
+    </div>
+  `);
+  hydrateIcons();
+}
+
+function updateOnboarding() {
+  const panel = document.querySelector('#onboarding');
+  if (!panel || !state.onboarding.active) {
+    return;
+  }
+
+  const step = state.onboarding.steps[state.onboarding.index];
+  const target = step ? document.querySelector(step.selector) : null;
+  if (!step || !target) {
+    completeOnboarding();
+    return;
+  }
+
+  if (step.selector === '#lineForm' || step.selector === '#stopSearchForm') {
+    setMobilePanelCollapsed(false);
+  }
+
+  const progress = `${state.onboarding.index + 1}/${state.onboarding.steps.length}`;
+  panel.hidden = false;
+  panel.querySelector('#onboardingStepIcon').innerHTML = `<i data-lucide="${escapeHtml(step.icon)}"></i>`;
+  panel.querySelector('#onboardingTitle').textContent = step.title;
+  panel.querySelector('#onboardingProgress').textContent = progress;
+  panel.querySelector('#onboardingBody').textContent = step.body;
+  const prevButton = panel.querySelector('[data-onboarding-prev]');
+  const nextButton = panel.querySelector('[data-onboarding-next]');
+  if (prevButton) {
+    prevButton.disabled = state.onboarding.index === 0;
+  }
+  if (nextButton) {
+    nextButton.querySelector('span').textContent = state.onboarding.index === state.onboarding.steps.length - 1 ? 'Valmis' : 'Edasi';
+  }
+
+  hydrateIcons();
+  target.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+  window.requestAnimationFrame(positionOnboarding);
+}
+
+function positionOnboarding() {
+  const panel = document.querySelector('#onboarding');
+  if (!panel || panel.hidden || !state.onboarding.active) {
+    return;
+  }
+
+  const step = state.onboarding.steps[state.onboarding.index];
+  const target = step ? document.querySelector(step.selector) : null;
+  const card = panel.querySelector('.onboarding-card');
+  const highlight = panel.querySelector('.onboarding-highlight');
+  if (!target || !card || !highlight) {
+    return;
+  }
+
+  const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
+  const padding = viewportWidth < 640 ? 8 : 10;
+  const rect = target.getBoundingClientRect();
+  const highlightLeft = clampNumber(rect.left - padding, 8, viewportWidth - 24);
+  const highlightTop = clampNumber(rect.top - padding, 8, viewportHeight - 24);
+  const highlightRight = clampNumber(rect.right + padding, 24, viewportWidth - 8);
+  const highlightBottom = clampNumber(rect.bottom + padding, 24, viewportHeight - 8);
+
+  highlight.style.left = `${highlightLeft}px`;
+  highlight.style.top = `${highlightTop}px`;
+  highlight.style.width = `${Math.max(16, highlightRight - highlightLeft)}px`;
+  highlight.style.height = `${Math.max(16, highlightBottom - highlightTop)}px`;
+
+  card.style.left = '12px';
+  card.style.top = '12px';
+  const cardRect = card.getBoundingClientRect();
+  const gap = 14;
+  const margin = viewportWidth < 640 ? 10 : 16;
+  const targetIsLarge = rect.width > viewportWidth * 0.65 || rect.height > viewportHeight * 0.45;
+  let left = targetIsLarge ? rect.left + 18 : rect.left + (rect.width / 2) - (cardRect.width / 2);
+  let top;
+
+  if (targetIsLarge) {
+    top = Math.max(margin, rect.top + 18);
+  } else if (rect.bottom + gap + cardRect.height <= viewportHeight - margin) {
+    top = rect.bottom + gap;
+  } else if (rect.top - gap - cardRect.height >= margin) {
+    top = rect.top - gap - cardRect.height;
+  } else {
+    top = viewportHeight - cardRect.height - margin;
+  }
+
+  left = clampNumber(left, margin, viewportWidth - cardRect.width - margin);
+  top = clampNumber(top, margin, viewportHeight - cardRect.height - margin);
+  card.style.left = `${left}px`;
+  card.style.top = `${top}px`;
+}
+
+function nextOnboardingStep() {
+  if (!state.onboarding.active) {
+    return;
+  }
+
+  if (state.onboarding.index >= state.onboarding.steps.length - 1) {
+    completeOnboarding();
+    return;
+  }
+
+  state.onboarding.index += 1;
+  updateOnboarding();
+}
+
+function previousOnboardingStep() {
+  if (!state.onboarding.active || state.onboarding.index === 0) {
+    return;
+  }
+
+  state.onboarding.index -= 1;
+  updateOnboarding();
+}
+
+function completeOnboarding({ remember = true } = {}) {
+  const panel = document.querySelector('#onboarding');
+  if (panel) {
+    panel.hidden = true;
+  }
+
+  state.onboarding.active = false;
+  state.onboarding.index = 0;
+  state.onboarding.steps = [];
+  document.body.classList.remove('onboarding-open');
+  if (remember) {
+    markOnboardingSeen();
+  }
+}
+
+function handleOnboardingClick(event) {
+  const panel = document.querySelector('#onboarding');
+  if (!panel || panel.hidden) {
+    return;
+  }
+
+  if (event.target.closest('[data-onboarding-next]')) {
+    nextOnboardingStep();
+    return;
+  }
+  if (event.target.closest('[data-onboarding-prev]')) {
+    previousOnboardingStep();
+    return;
+  }
+  if (event.target.closest('[data-onboarding-skip]') || event.target.closest('[data-onboarding-close]')) {
+    completeOnboarding();
+  }
+}
+
+async function setTransferStop(stop, { focus = true, openResult = false } = {}) {
+  if (!isStopCoordinate(stop)) {
+    return;
+  }
+
+  const nextStop = normalizeStopForStorage(stop);
+  state.transfer.stop = nextStop;
+  state.transfer.targetDepartureKey = '';
+  saveTransferStop(nextStop);
+  if (els.transferStopSearch) {
+    els.transferStopSearch.value = '';
+  }
+  if (els.transferStopResults) {
+    els.transferStopResults.innerHTML = '';
+  }
+
+  placeTransferStopMarker(nextStop);
+  selectStop(nextStop);
+  if (focus && state.map) {
+    state.map.setView([nextStop.lat, nextStop.lon], Math.max(state.map.getZoom(), 15), { animate: true });
+  }
+
+  const departurePromise = fetchTransferDepartures(nextStop);
+  updateTransferResult();
+  refreshVehiclePopupContents();
+
+  if (openResult) {
+    await departurePromise;
+    openTransferResultPopup();
+  }
+}
+
+function openTransferResultPopup() {
+  const vehicle = selectedTransferVehicle();
+  if (!vehicle) {
+    return;
+  }
+
+  const marker = state.vehicleMarkers.get(vehicleKey(vehicle));
+  if (!marker) {
+    return;
+  }
+
+  marker.setPopupContent(vehiclePopup(vehicle, vehicleDelayRisk(vehicle)));
+  marker.openPopup();
+  hydrateIcons();
+}
+
+function placeTransferStopMarker(stop) {
+  state.transferStopLayer?.clearLayers();
+  if (!isStopCoordinate(stop)) {
+    return;
+  }
+
+  const marker = L.marker([stop.lat, stop.lon], {
+    pane: 'transferStopPane',
+    icon: transferStopIcon(stop),
+    title: `${stop.name || 'Peatus'} · ümberistumine`,
+    zIndexOffset: 900,
+  }).addTo(state.transferStopLayer);
+
+  marker.bindPopup(stopPopupContent(stop, [], true), {
+    minWidth: 240,
+    maxWidth: 310,
+  });
+
+  marker.on('click', async () => {
+    await loadStopPopupDepartures(stop, marker);
+  });
+
+  hydrateIcons();
+}
+
+function transferStopIcon(stop) {
+  return L.divIcon({
+    className: 'transfer-stop-marker',
+    html: `
+      <div class="transfer-stop-pin">
+        <i data-lucide="git-branch"></i>
+        <strong>${escapeHtml(shortText(stop.name || 'Peatus', 16))}</strong>
+      </div>
+    `,
+    iconSize: [154, 46],
+    iconAnchor: [20, 40],
+    popupAnchor: [0, -35],
+  });
+}
+
+async function fetchTransferDepartures(stop, { silent = false } = {}) {
+  if (!stop?.id) {
+    state.transfer.departures = [];
+    state.transfer.targetDepartureKey = '';
+    state.transfer.loadingDepartures = false;
+    state.transfer.departureError = '';
+    renderTransferDepartures();
+    updateTransferResult();
+    return;
+  }
+
+  const requestId = ++state.transfer.departureRequestId;
+  state.transfer.loadingDepartures = true;
+  state.transfer.departureError = '';
+  if (!silent) {
+    renderTransferDepartures();
+    updateTransferResult();
+  }
+
+  const params = new URLSearchParams({ action: 'departures', stopid: stop.id });
+
+  try {
+    const data = await fetchJson(`api.html?${params.toString()}`);
+    if (requestId !== state.transfer.departureRequestId) {
+      return;
+    }
+
+    state.transfer.departures = (data.departures || [])
+      .filter((departure) => departure.type === 'bus')
+      .map((departure, index) => ({
+        ...departure,
+        transferKey: transferDepartureKey(departure, index),
+      }));
+    state.transfer.loadingDepartures = false;
+    chooseTransferDefaultDeparture();
+    renderTransferDepartures();
+    updateTransferResult();
+    refreshVehiclePopupContents();
+  } catch (error) {
+    if (requestId !== state.transfer.departureRequestId) {
+      return;
+    }
+
+    state.transfer.departures = [];
+    state.transfer.loadingDepartures = false;
+    state.transfer.departureError = error.message;
+    renderTransferDepartures();
+    updateTransferResult();
+    refreshVehiclePopupContents();
+  }
+}
+
+async function refreshTransferEstimate() {
+  const lines = [
+    selectedTransferVehicle()?.line,
+    selectedTransferTargetVehicle()?.line,
+    state.transfer.targetLine,
+  ].map((line) => normalizeLine(String(line || ''))).filter(Boolean);
+
+  if (lines.length > 0) {
+    await ensureDelaySchedules(uniqueSortedLines(lines));
+  }
+
+  if (state.transfer.stop) {
+    await fetchTransferDepartures(state.transfer.stop, { silent: true });
+  }
+
+  chooseTransferDefaultDeparture();
+  renderTransferDepartures();
+  updateTransferResult();
+  refreshVehiclePopupContents();
+}
+
+function renderTransferDepartures() {
+  if (!els.transferTargetDeparture) {
+    return;
+  }
+
+  if (!state.transfer.stop) {
+    els.transferTargetDeparture.innerHTML = '<option value="">Vali peatus</option>';
+    els.transferTargetDeparture.value = '';
+    state.transfer.targetDepartureKey = '';
+    return;
+  }
+
+  if (state.transfer.loadingDepartures) {
+    els.transferTargetDeparture.innerHTML = '<option value="">Laen väljumisi...</option>';
+    els.transferTargetDeparture.value = '';
+    state.transfer.targetDepartureKey = '';
+    return;
+  }
+
+  if (state.transfer.departureError) {
+    els.transferTargetDeparture.innerHTML = '<option value="">Väljumisi ei saanud laadida</option>';
+    els.transferTargetDeparture.value = '';
+    state.transfer.targetDepartureKey = '';
+    return;
+  }
+
+  const departures = transferFilteredDepartures();
+  const targetLine = normalizeLine(state.transfer.targetLine || '');
+
+  if (departures.length === 0) {
+    els.transferTargetDeparture.innerHTML = `<option value="">${escapeHtml(targetLine ? `Liin ${targetLine} lähiajal puudub` : 'Väljumisi ei leitud')}</option>`;
+    els.transferTargetDeparture.value = '';
+    state.transfer.targetDepartureKey = '';
+    return;
+  }
+
+  const selectedKey = departures.some((departure) => departure.transferKey === state.transfer.targetDepartureKey)
+    ? state.transfer.targetDepartureKey
+    : departures[0].transferKey;
+
+  els.transferTargetDeparture.innerHTML = departures.map((departure) => {
+    return `<option value="${escapeHtml(departure.transferKey)}">${escapeHtml(transferDepartureLabel(departure))}</option>`;
+  }).join('');
+  els.transferTargetDeparture.value = selectedKey;
+  state.transfer.targetDepartureKey = selectedKey;
+}
+
+function transferDepartureKey(departure, index) {
+  return [
+    normalizeLine(String(departure.line || '')),
+    departure.expectedSeconds ?? '',
+    departure.scheduledSeconds ?? '',
+    departure.vehicleId || '',
+    departure.destination || '',
+    index,
+  ].join('|');
+}
+
+function transferFilteredDepartures() {
+  const targetLine = normalizeLine(state.transfer.targetLine || '');
+  const targetVehicle = selectedTransferTargetVehicle();
+  const targetVehicleId = String(targetVehicle?.id || '');
+  return [...state.transfer.departures]
+    .filter((departure) => !targetLine || normalizeLine(String(departure.line || '')) === targetLine)
+    .sort((a, b) => {
+      const vehicleScoreA = targetVehicleId && String(a.vehicleId || '') === targetVehicleId ? 0 : 1;
+      const vehicleScoreB = targetVehicleId && String(b.vehicleId || '') === targetVehicleId ? 0 : 1;
+      const waitA = transferDepartureWaitMinutes(a);
+      const waitB = transferDepartureWaitMinutes(b);
+      return vehicleScoreA - vehicleScoreB
+        || (Number.isFinite(waitA) ? waitA : Infinity) - (Number.isFinite(waitB) ? waitB : Infinity);
+    });
+}
+
+function transferDepartureLabel(departure) {
+  const wait = transferDepartureWaitMinutes(departure);
+  const waitLabel = Number.isFinite(wait) ? `${Math.max(0, Math.round(wait))} min` : departure.expectedTime;
+  const vehicle = departure.vehicleId ? ` · ${departure.vehicleId}` : '';
+  const targetVehicle = selectedTransferTargetVehicle();
+  const sameVehicle = targetVehicle && String(departure.vehicleId || '') === String(targetVehicle.id || '')
+    ? ' · sama buss'
+    : '';
+  return `${departure.line} · ${departure.destination || 'Siht teadmata'} · ${waitLabel}${vehicle}${sameVehicle}`;
+}
+
+function chooseTransferDefaultDeparture() {
+  const departures = transferFilteredDepartures();
+  const targetVehicle = selectedTransferTargetVehicle();
+  if (targetVehicle) {
+    const matchingVehicleDeparture = departures.find((departure) => {
+      return String(departure.vehicleId || '') === String(targetVehicle.id || '');
+    });
+    if (matchingVehicleDeparture) {
+      state.transfer.targetDepartureKey = matchingVehicleDeparture.transferKey;
+      return;
+    }
+  }
+
+  if (departures.some((departure) => departure.transferKey === state.transfer.targetDepartureKey)) {
+    return;
+  }
+
+  state.transfer.targetDepartureKey = departures[0]?.transferKey || '';
+}
+
+function selectedTransferVehicle() {
+  return state.vehicles.find((vehicle) => vehicleKey(vehicle) === state.transfer.currentVehicleKey) || null;
+}
+
+function selectedTransferTargetVehicle() {
+  return state.vehicles.find((vehicle) => vehicleKey(vehicle) === state.transfer.targetVehicleKey) || null;
+}
+
+function selectedTransferDeparture() {
+  return transferFilteredDepartures().find((departure) => departure.transferKey === state.transfer.targetDepartureKey) || null;
+}
+
+function updateTransferResult() {
+  const result = calculateTransferChance();
+  updateTransferSummary(result);
+
+  if (!els.transferResult) {
+    return;
+  }
+
+  if (result.status === 'ready') {
+    els.transferResult.innerHTML = renderTransferChance(result);
+    return;
+  }
+
+  const errorClass = result.status === 'error' || result.status === 'unavailable' ? 'error' : '';
+  els.transferResult.innerHTML = `<div class="empty-state ${errorClass}">${escapeHtml(result.message)}</div>`;
+}
+
+function refreshVehiclePopupContents() {
+  if (!state.vehicleMarkers?.size) {
+    return;
+  }
+
+  state.vehicleMarkers.forEach((marker, key) => {
+    const vehicle = state.vehicles.find((item) => vehicleKey(item) === key);
+    if (!vehicle) {
+      return;
+    }
+
+    marker.setPopupContent(vehiclePopup(vehicle, vehicleDelayRisk(vehicle)));
+    if (marker.isPopupOpen?.()) {
+      window.requestAnimationFrame(hydrateIcons);
+    }
+  });
+}
+
+function updateTransferSummary(result) {
+  if (!els.transferSummary) {
+    return;
+  }
+
+  if (result.status === 'ready') {
+    els.transferSummary.textContent = `${result.probability}% võimalus`;
+    return;
+  }
+
+  if (result.status === 'loading') {
+    els.transferSummary.textContent = 'Laen väljumisi';
+    return;
+  }
+
+  const selectedCount = [
+    state.transfer.currentVehicleKey,
+    state.transfer.stop?.id,
+    state.transfer.targetDepartureKey || state.transfer.targetVehicleKey || state.transfer.targetLine,
+  ].filter(Boolean).length;
+  els.transferSummary.textContent = `${selectedCount}/3 valitud`;
+}
+
+function calculateTransferChance() {
+  const vehicle = selectedTransferVehicle();
+  if (!vehicle) {
+    return { status: 'missing', message: 'Vali buss, mille peal oled' };
+  }
+
+  if (!state.transfer.stop) {
+    return { status: 'missing', message: 'Vali ümberistumise peatus' };
+  }
+
+  if (state.transfer.loadingDepartures) {
+    return { status: 'loading', message: 'Laen selle peatuse väljumisi...' };
+  }
+
+  if (state.transfer.departureError) {
+    return { status: 'error', message: state.transfer.departureError };
+  }
+
+  const departure = selectedTransferDeparture();
+  const targetVehicle = selectedTransferTargetVehicle();
+  if (!departure && !targetVehicle) {
+    return { status: 'missing', message: 'Vali buss, mille peale tahad jõuda' };
+  }
+
+  const arrival = estimateVehicleArrivalAtTransferStop(vehicle, state.transfer.stop);
+  if (!arrival) {
+    return { status: 'unavailable', message: 'Praeguse bussi ETA-d ei saanud piisavalt täpselt leida' };
+  }
+
+  const targetArrival = departure
+    ? null
+    : estimateVehicleArrivalAtTransferStop(targetVehicle, state.transfer.stop);
+  if (!departure && !targetArrival) {
+    return { status: 'unavailable', message: 'Sihtbussi ETA-d ei saanud selle peatuse jaoks leida' };
+  }
+
+  const targetWait = departure ? transferDepartureWaitMinutes(departure) : targetArrival.waitMinutes;
+  if (!Number.isFinite(targetWait)) {
+    return { status: 'unavailable', message: 'Sihtbussi väljumisaega ei saanud lugeda' };
+  }
+
+  const margin = targetWait - arrival.waitMinutes - TRANSFER_WALK_BUFFER_MINUTES;
+  const gpsAge = Number(vehicle.ageSeconds || 0);
+  const uncertainty = clampNumber(2.1 + (1 - arrival.confidence) * 5 + gpsAge / 90, 2.1, 7.5);
+  let probability = Math.round(100 / (1 + Math.exp(-margin / uncertainty)));
+  if (arrival.method === 'distance') {
+    probability = Math.min(probability, 72);
+  }
+  probability = clampNumber(probability, 3, 97);
+
+  const level = probability >= 70 ? 'good' : probability >= 40 ? 'medium' : 'bad';
+  return {
+    status: 'ready',
+    level,
+    probability,
+    margin,
+    vehicle,
+    departure,
+    targetVehicle,
+    targetArrival,
+    targetLine: departure?.line || targetVehicle?.line || state.transfer.targetLine || '',
+    arrival,
+    targetWait,
+    targetClock: departure?.expectedTime || targetArrival?.arrivalClock || minutesToClock(Math.round(currentMinutesOfDay() + targetWait)),
+  };
+}
+
+function renderTransferChance(result) {
+  const title = transferOutcomeTitle(result);
+  const marginLabel = transferMarginLabel(result.margin);
+  const methodLabel = transferMethodLabel(result);
+  const stopName = state.transfer.stop?.name || 'peatus';
+
+  return `
+    <article class="transfer-card ${result.level}">
+      <div class="transfer-score">
+        <strong>${result.probability}%</strong>
+        <span>Tõenäosus</span>
+      </div>
+      <div class="transfer-card-main">
+        <strong>${escapeHtml(title)}</strong>
+        <span>${escapeHtml(result.vehicle.line)} jõuab ${escapeHtml(stopName)} umbes ${escapeHtml(result.arrival.arrivalClock)}; ${escapeHtml(result.targetLine || 'sihtbuss')} väljub ${escapeHtml(result.targetClock)}.</span>
+        <i class="transfer-probability-bar" style="--chance: ${clampNumber(result.probability, 0, 100)}%"></i>
+      </div>
+    </article>
+    <div class="transfer-metrics">
+      <span>${escapeHtml(marginLabel)}</span>
+      <span>Saabub ${escapeHtml(result.arrival.arrivalClock)}</span>
+      <span>Siht ${escapeHtml(result.targetClock)}</span>
+      <span>Puhver ${TRANSFER_WALK_BUFFER_MINUTES} min</span>
+      <span>${escapeHtml(methodLabel)}</span>
+    </div>
+  `;
+}
+
+function transferOutcomeTitle(result) {
+  const probability = Number(result?.probability || 0);
+  if (probability >= 70) {
+    return 'Jõudmine on tõenäoline';
+  }
+
+  if (probability >= 40) {
+    return 'Napikas ümberistumine';
+  }
+
+  return 'Risk on suur';
+}
+
+function transferMethodLabel(result) {
+  return result?.arrival?.method === 'schedule' ? 'GPS + sõiduplaan' : 'GPS kaugus';
+}
+
+function transferMarginLabel(margin) {
+  const rounded = Math.round(margin);
+  if (rounded >= 0) {
+    return `Varu +${rounded} min`;
+  }
+
+  return `Puudu ${Math.abs(rounded)} min`;
+}
+
+function estimateVehicleArrivalAtTransferStop(vehicle, stop) {
+  return estimateVehicleScheduleArrival(vehicle, stop) || estimateVehicleDistanceArrival(vehicle, stop);
+}
+
+function estimateVehicleScheduleArrival(vehicle, stop) {
+  const line = normalizeLine(vehicle.line || '');
+  const routes = state.delayScheduleRoutes.get(line) || [];
+  const gpsAge = Number(vehicle.ageSeconds || 0);
+  const destination = normalizeScheduleText(vehicle.destination || '');
+
+  const candidates = routes.map((route) => {
+    const transferIndex = routeStopIndex(route, stop);
+    const position = vehicleRouteSchedulePosition(route, vehicle);
+    if (transferIndex < 0 || !position) {
+      return null;
+    }
+
+    if (transferIndex < position.controlStopIndex || (transferIndex === position.stopIndex && position.ratio > 0.35)) {
+      return null;
+    }
+
+    const delay = scheduleDelayAtPosition(route, position);
+    if (!delay) {
+      return null;
+    }
+
+    const exploded = route._scheduleExploded || (route._scheduleExploded = explodeRouteTimes(route.times || ''));
+    const tripCount = exploded.workdays.length;
+    const scheduledTransferTime = exploded.times[transferIndex * tripCount + delay.tripIndex];
+    if (!Number.isFinite(scheduledTransferTime)) {
+      return null;
+    }
+
+    const destinationScore = scheduleDestinationMatchScore(route, destination);
+    const pathMeters = routeDistanceFromPositionToStop(route, position, transferIndex);
+    const waitMinutes = minutesUntilScheduleTime(scheduledTransferTime + delay.delayMinutes);
+    const confidence = clampNumber(0.9 - position.distanceMeters / 1400 - gpsAge / 600 - (destinationScore === 0 ? 0.08 : 0), 0.45, 0.95);
+
+    return {
+      method: 'schedule',
+      route,
+      waitMinutes,
+      arrivalClock: minutesToClock(Math.round(currentMinutesOfDay() + waitMinutes)),
+      confidence,
+      matchScore: position.distanceMeters + pathMeters / 120 - destinationScore * 700,
+    };
+  }).filter(Boolean)
+    .sort((a, b) => a.matchScore - b.matchScore || a.waitMinutes - b.waitMinutes);
+
+  return candidates[0] || null;
+}
+
+function estimateVehicleDistanceArrival(vehicle, stop) {
+  if (!isVehicleCoordinate(vehicle) || !isStopCoordinate(stop)) {
+    return null;
+  }
+
+  const meters = distanceMeters(vehicle.lat, vehicle.lon, stop.lat, stop.lon);
+  if (!Number.isFinite(meters) || meters > 22000) {
+    return null;
+  }
+
+  const speed = Number(vehicle.speed);
+  const speedKmh = Number.isFinite(speed) && speed > 5 ? clampNumber(speed, 10, 45) : 20;
+  const waitMinutes = (meters / (speedKmh * 1000 / 60)) * 1.25 + 1;
+  return {
+    method: 'distance',
+    waitMinutes,
+    arrivalClock: minutesToClock(Math.round(currentMinutesOfDay() + waitMinutes)),
+    confidence: clampNumber(0.42 - meters / 60000, 0.22, 0.42),
+  };
+}
+
+function routeStopIndex(route, targetStop) {
+  const stops = Array.isArray(route.stops) ? route.stops : [];
+  const exactIndex = stops.findIndex((stop) => scheduleStopsMatch(stop, targetStop));
+  if (exactIndex >= 0) {
+    return exactIndex;
+  }
+
+  const targetName = normalizeScheduleText(targetStop.name || '');
+  let bestIndex = -1;
+  let bestDistance = Infinity;
+  stops.forEach((stop, index) => {
+    if (!isStopCoordinate(stop)) {
+      return;
+    }
+
+    const distance = distanceMeters(stop.lat, stop.lon, targetStop.lat, targetStop.lon);
+    const namesMatch = targetName && normalizeScheduleText(stop.name || '') === targetName;
+    if (distance < bestDistance && (distance <= 90 || (namesMatch && distance <= 220))) {
+      bestIndex = index;
+      bestDistance = distance;
+    }
+  });
+
+  return bestIndex;
+}
+
+function routeDistanceFromPositionToStop(route, position, transferIndex) {
+  const stops = Array.isArray(route.stops) ? route.stops : [];
+  if (!stops[position.stopIndex] || !stops[transferIndex] || transferIndex <= position.stopIndex) {
+    return 0;
+  }
+
+  let meters = 0;
+  const start = stops[position.stopIndex];
+  const next = stops[position.stopIndex + 1];
+  if (isStopCoordinate(start) && isStopCoordinate(next)) {
+    meters += distanceMeters(start.lat, start.lon, next.lat, next.lon) * (1 - clampNumber(position.ratio, 0, 1));
+  }
+
+  for (let index = position.stopIndex + 1; index < transferIndex; index += 1) {
+    const from = stops[index];
+    const to = stops[index + 1];
+    if (isStopCoordinate(from) && isStopCoordinate(to)) {
+      meters += distanceMeters(from.lat, from.lon, to.lat, to.lon);
+    }
+  }
+
+  return meters;
+}
+
+function minutesUntilScheduleTime(timeMinutes) {
+  const now = currentMinutesOfDay();
+  const options = [timeMinutes, timeMinutes - 1440, timeMinutes + 1440]
+    .map((time) => time - now)
+    .filter((diff) => diff >= -1)
+    .sort((a, b) => a - b);
+  return Math.max(0, options[0] ?? positiveModulo(timeMinutes - now, 1440));
+}
+
+function transferDepartureWaitMinutes(departure) {
+  const minutesUntil = Number(departure?.minutesUntil);
+  if (Number.isFinite(minutesUntil)) {
+    return Math.max(0, minutesUntil);
+  }
+
+  const expectedSeconds = Number(departure?.expectedSeconds);
+  if (!Number.isFinite(expectedSeconds)) {
+    return NaN;
+  }
+
+  const nowSeconds = currentMinutesOfDay() * 60;
+  return positiveModulo(expectedSeconds - nowSeconds, 86400) / 60;
+}
+
+function vehicleTransferStepsHtml() {
+  const steps = [
+    { label: 'Minu', active: Boolean(state.transfer.currentVehicleKey) },
+    { label: 'Siht', active: Boolean(state.transfer.targetDepartureKey || state.transfer.targetVehicleKey || state.transfer.targetLine) },
+    { label: 'Peatus', active: Boolean(state.transfer.stop) },
+  ];
+
+  return `
+    <div class="vehicle-transfer-steps" aria-label="Ümberistumise sammud">
+      ${steps.map((step, index) => `
+        <span class="vehicle-transfer-step ${step.active ? 'is-done' : ''}">
+          <i>${step.active ? '✓' : index + 1}</i>
+          <span>${escapeHtml(step.label)}</span>
+        </span>
+      `).join('')}
+    </div>
+  `;
+}
+
+function handleTransferActionClick(event) {
+  const currentButton = event.target.closest('[data-transfer-current-vehicle]');
+  if (currentButton) {
+    event.preventDefault();
+    event.stopPropagation();
+    setTransferCurrentVehicle(currentButton.dataset.transferCurrentVehicle);
+    return;
+  }
+
+  const targetButton = event.target.closest('[data-transfer-target-vehicle]');
+  if (targetButton) {
+    event.preventDefault();
+    event.stopPropagation();
+    setTransferTargetVehicle(targetButton.dataset.transferTargetVehicle);
+    return;
+  }
+
+  const toggleButton = event.target.closest('[data-transfer-toggle]');
+  if (toggleButton) {
+    event.preventDefault();
+    event.stopPropagation();
+    state.transfer.popupExpanded = !state.transfer.popupExpanded;
+    refreshVehiclePopupContents();
+    return;
+  }
+
+  const resetButton = event.target.closest('[data-transfer-reset]');
+  if (resetButton) {
+    event.preventDefault();
+    event.stopPropagation();
+    resetTransferSelection();
+    return;
+  }
+
+  const refreshButton = event.target.closest('[data-transfer-refresh]');
+  if (refreshButton) {
+    event.preventDefault();
+    event.stopPropagation();
+    refreshTransferEstimate();
+    return;
+  }
+
+  const lineButton = event.target.closest('[data-transfer-target-line]');
+  if (lineButton) {
+    event.preventDefault();
+    event.stopPropagation();
+    setTransferTargetLine(lineButton.dataset.transferTargetLine);
+    return;
+  }
+
+  const stopButton = event.target.closest('[data-transfer-stop]');
+  if (stopButton) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (stopButton.disabled || stopButton.getAttribute('aria-disabled') === 'true') {
+      return;
+    }
+    const stop = decodeFavoriteStop(stopButton.dataset.transferStop);
+    if (stop) {
+      setTransferStop(stop, { focus: false, openResult: true });
+    }
+  }
+}
+
+function hasTransferBusSelection() {
+  return Boolean(state.transfer.currentVehicleKey && (state.transfer.targetVehicleKey || state.transfer.targetLine));
+}
+
+function transferSummaryText(result) {
+  if (result.status === 'ready') {
+    return `${transferOutcomeTitle(result)} · ${transferMarginLabel(result.margin)}`;
+  }
+
+  if (result.status === 'loading') {
+    return 'Arvutan väljumisi';
+  }
+
+  if (!state.transfer.currentVehicleKey) {
+    return '1. Vali Minu buss';
+  }
+
+  if (!state.transfer.targetVehicleKey && !state.transfer.targetLine) {
+    return '2. Vali Sihtbuss';
+  }
+
+  if (!state.transfer.stop) {
+    return '3. Vali peatus';
+  }
+
+  return result.message || 'Kontrollin ümberistumist';
+}
+
+function transferGuideState(result, vehicle) {
+  if (result.status === 'loading') {
+    return {
+      icon: 'loader-circle',
+      title: 'Arvutan tõenäosust',
+      body: 'Laen valitud peatuse lähiväljumisi ja võrdlen aegu.',
+      tone: 'loading',
+    };
+  }
+
+  if (result.status === 'error' || result.status === 'unavailable') {
+    return {
+      icon: 'alert-circle',
+      title: 'Arvutus jäi pooleli',
+      body: result.message || 'Proovi mõnda teist peatust või uuenda andmeid.',
+      tone: 'warning',
+    };
+  }
+
+  if (!state.transfer.currentVehicleKey) {
+    return {
+      icon: 'user-round',
+      title: '1. Märgi oma buss',
+      body: vehicle ? 'Kui oled selle bussi peal, vajuta „Minu buss“.' : 'Ava buss, mille peal oled, ja vajuta „Minu buss“.',
+      tone: 'next',
+    };
+  }
+
+  if (!state.transfer.targetVehicleKey && !state.transfer.targetLine) {
+    return {
+      icon: 'flag',
+      title: '2. Märgi sihtbuss',
+      body: 'Ava buss, mille peale tahad jõuda, ja vajuta „Sihtbuss“.',
+      tone: 'next',
+    };
+  }
+
+  if (!state.transfer.stop) {
+    return {
+      icon: 'map-pin',
+      title: '3. Vali ümberistumise peatus',
+      body: 'Ava peatuse aken kaardil ja vajuta „Ümberistun siin“.',
+      tone: 'next',
+    };
+  }
+
+  return {
+    icon: 'route',
+    title: 'Kontrollin ümberistumist',
+    body: result.message || 'Võrdlen busside saabumise ja väljumise aegu.',
+    tone: 'next',
+  };
+}
+
+function transferGuideHtml(result, vehicle) {
+  const guide = transferGuideState(result, vehicle);
+  return `
+    <div class="vehicle-transfer-note ${guide.tone}">
+      <i data-lucide="${escapeHtml(guide.icon)}"></i>
+      <span>
+        <b>${escapeHtml(guide.title)}</b>
+        <small>${escapeHtml(guide.body)}</small>
+      </span>
+    </div>
+  `;
+}
+
+function vehicleTransferPanelHtml(vehicle) {
+  const key = vehicleKey(vehicle);
+  const isCurrent = state.transfer.currentVehicleKey === key;
+  const isTarget = state.transfer.targetVehicleKey === key;
+  const stop = state.transfer.stop;
+  const result = calculateTransferChance();
+  const expanded = Boolean(state.transfer.popupExpanded);
+  const canCalculate = Boolean(state.transfer.currentVehicleKey && (state.transfer.targetVehicleKey || state.transfer.targetLine) && stop);
+  const refreshTitle = hasTransferBusSelection()
+    ? stop
+      ? 'Arvuta ümberistumine'
+      : 'Vali ümberistumise peatus peatuse aknast'
+    : 'Vali enne bussid välja';
+  const hasTransferSelection = Boolean(
+    state.transfer.currentVehicleKey
+    || state.transfer.targetVehicleKey
+    || state.transfer.targetLine
+    || state.transfer.targetDepartureKey
+    || stop
+  );
+  const selectedCount = [
+    state.transfer.currentVehicleKey,
+    stop?.id,
+    state.transfer.targetDepartureKey || state.transfer.targetVehicleKey || state.transfer.targetLine,
+  ].filter(Boolean).length;
+  const statusBadge = result.status === 'ready' ? `${result.probability}%` : `${selectedCount}/3`;
+  const statusText = transferSummaryText(result);
+  const resultHtml = result.status === 'ready'
+    ? `
+      <div class="vehicle-transfer-result ${result.level}">
+        <strong>${result.probability}%</strong>
+        <span>
+          <b>${escapeHtml(transferOutcomeTitle(result))}</b>
+          <small>${escapeHtml(transferMarginLabel(result.margin))} · ${escapeHtml(result.targetClock)}</small>
+        </span>
+        <i class="vehicle-transfer-mini-bar" style="--chance: ${clampNumber(result.probability, 0, 100)}%"></i>
+      </div>
+    `
+    : transferGuideHtml(result, vehicle);
+
+  return `
+    <section class="vehicle-transfer-panel ${expanded ? 'is-open' : 'is-collapsed'}" aria-label="Ümberistumise valikud">
+      <button class="vehicle-transfer-toggle" type="button" data-transfer-toggle aria-expanded="${expanded ? 'true' : 'false'}">
+        <span>
+          <strong>Ümberistumine</strong>
+          <small>${escapeHtml(statusText)}</small>
+        </span>
+        <em class="${result.status === 'ready' ? result.level : ''}">${escapeHtml(statusBadge)}</em>
+        <i data-lucide="${expanded ? 'chevron-up' : 'chevron-down'}"></i>
+      </button>
+      <div class="vehicle-transfer-body" ${expanded ? '' : 'hidden'}>
+        ${vehicleTransferStepsHtml()}
+        <div class="vehicle-transfer-actions">
+          <button class="vehicle-transfer-button ${isCurrent ? 'is-active' : ''}" type="button" data-transfer-current-vehicle="${escapeHtml(key)}" aria-pressed="${isCurrent ? 'true' : 'false'}">
+            <i data-lucide="${isCurrent ? 'check' : 'user-round'}"></i>
+            <span>Minu buss</span>
+          </button>
+          <button class="vehicle-transfer-button secondary ${isTarget ? 'is-active' : ''}" type="button" data-transfer-target-vehicle="${escapeHtml(key)}" aria-pressed="${isTarget ? 'true' : 'false'}">
+            <i data-lucide="${isTarget ? 'check' : 'flag'}"></i>
+            <span>Sihtbuss</span>
+          </button>
+        </div>
+        <div class="vehicle-transfer-stop">
+          <span class="vehicle-transfer-stop-name">${stop ? escapeHtml(stop.name || 'Ümberistumise peatus') : 'Peatus valimata'}</span>
+          <div class="vehicle-transfer-tools">
+            <button class="vehicle-transfer-refresh" type="button" data-transfer-refresh ${canCalculate ? '' : 'disabled'} title="${escapeHtml(refreshTitle)}" aria-label="${escapeHtml(refreshTitle)}">
+              <i data-lucide="route"></i>
+            </button>
+            <button class="vehicle-transfer-reset" type="button" data-transfer-reset ${hasTransferSelection ? '' : 'disabled'} title="Nulli ümberistumine" aria-label="Nulli ümberistumine">
+              <i data-lucide="rotate-ccw"></i>
+            </button>
+          </div>
+        </div>
+        ${resultHtml}
+      </div>
+    </section>
+  `;
+}
+
 async function fetchRoutes() {
   state.routeLayer.clearLayers();
   state.routes = [];
@@ -1408,12 +2941,13 @@ function renderOverviewRoutes(styledRoutes) {
 
     const color = routeColor(route.line);
     const emphasis = lineMapOpacity(route.line);
+    const dark = state.theme === 'dark';
 
     L.polyline(segments, {
       pane: 'routePane',
       color: routeGapColor(),
-      weight: style.weight + 3,
-      opacity: style.dashArray ? 0.58 : 0.44,
+      weight: style.weight + (dark ? 5 : 3),
+      opacity: dark ? (style.dashArray ? 0.72 : 0.58) : (style.dashArray ? 0.58 : 0.44),
       lineCap: 'round',
       lineJoin: 'round',
       dashArray: style.dashArray,
@@ -1425,8 +2959,8 @@ function renderOverviewRoutes(styledRoutes) {
     const line = L.polyline(segments, {
       pane: 'routePane',
       color,
-      weight: style.weight,
-      opacity: 0.9 * emphasis,
+      weight: style.weight + (dark ? 1 : 0),
+      opacity: Math.min(1, (dark ? 1 : 0.9) * emphasis),
       lineCap: 'round',
       lineJoin: 'round',
       dashArray: style.dashArray,
@@ -1453,12 +2987,13 @@ function routeNeedsOverviewSideOffset(route, styledRoutes) {
 
 function renderRouteRun(run) {
   const { pattern, points, style } = run;
+  const dark = state.theme === 'dark';
   if (!pattern.isAlternating) {
     L.polyline(points, {
       pane: 'routePane',
       color: routeGapColor(),
-      weight: style.weight + 4,
-      opacity: style.dashArray ? 0.7 : 0.58,
+      weight: style.weight + (dark ? 6 : 4),
+      opacity: dark ? (style.dashArray ? 0.78 : 0.64) : (style.dashArray ? 0.7 : 0.58),
       lineCap: 'round',
       lineJoin: 'round',
       dashArray: pattern.dashArray,
@@ -1471,8 +3006,8 @@ function renderRouteRun(run) {
   const line = L.polyline(points, {
     pane: 'routePane',
     color: run.color,
-    weight: style.weight,
-    opacity: run.opacity,
+    weight: style.weight + (dark ? 1 : 0),
+    opacity: Math.min(1, run.opacity * (dark ? 1.08 : 1)),
     lineCap: pattern.lineCap,
     lineJoin: 'round',
     dashArray: pattern.dashArray,
@@ -1872,7 +3407,7 @@ function layerPointDistance(pointA, pointB) {
 }
 
 function routeGapColor() {
-  return state.theme === 'dark' ? '#1e2a28' : '#ffffff';
+  return state.theme === 'dark' ? '#f3f7fb' : '#ffffff';
 }
 
 function routeDirectionStyle(route) {
@@ -2004,7 +3539,6 @@ function focusVehicle(vehicle) {
 }
 
 function vehiclePopup(vehicle, risk) {
-  const speed = vehicle.speed === null || vehicle.speed === undefined ? '-' : `${Math.round(vehicle.speed)} km/h`;
   const age = vehicle.ageSeconds === null || vehicle.ageSeconds === undefined ? '-' : `${Math.round(vehicle.ageSeconds)} s`;
   const riskClass = risk.level === 'high' ? 'high' : risk.level === 'medium' ? 'medium' : 'low';
   const riskDetail = risk.detail ? `<small>${escapeHtml(risk.detail)}</small>` : '';
@@ -2019,6 +3553,7 @@ function vehiclePopup(vehicle, risk) {
         </span>
         <em class="popup-risk-badge ${riskClass}">${risk.level === 'low' ? 'OK' : '!'}</em>
       </div>
+      ${vehicleTransferPanelHtml(vehicle)}
       <div class="popup-risk-note ${riskClass}">
         <strong>${escapeHtml(risk.label)}</strong>
         ${riskDetail}
@@ -2026,8 +3561,6 @@ function vehiclePopup(vehicle, risk) {
       ${fleetInfo}
       <dl>
         <dt>Sõiduk</dt><dd>${escapeHtml(vehicle.id)}</dd>
-        ${profile.model ? `<dt>Mudel</dt><dd>${escapeHtml(profile.model)}</dd>` : ''}
-        <dt>Kiirus</dt><dd>${speed}</dd>
         <dt>GPS vanus</dt><dd>${age}</dd>
         <dt>Olek</dt><dd>${risk.label}</dd>
       </dl>
@@ -2060,6 +3593,11 @@ function stopPopupContent(stop, departures, loading = false, error = '') {
   const busDepartures = (departures || [])
     .filter((departure) => departure.type === 'bus')
     .slice(0, 6);
+  const canSelectTransferStop = hasTransferBusSelection();
+  const transferButtonText = canSelectTransferStop ? 'Ümberistun siin' : 'Vali enne bussid';
+  const transferButtonTitle = canSelectTransferStop
+    ? 'Kasuta seda peatust ümberistumiseks'
+    : 'Vali enne praegune buss ja sihtbuss';
 
   let departuresHtml = '<div class="popup-loading">Laen väljumisi...</div>';
 
@@ -2094,6 +3632,9 @@ function stopPopupContent(stop, departures, loading = false, error = '') {
         ${favoriteStopButton(stop)}
       </div>
       <div class="popup-departures">${departuresHtml}</div>
+      <div class="popup-action-row">
+        <button class="popup-action-button secondary" type="button" data-transfer-stop="${escapeHtml(encodeFavoriteStop(stop))}" title="${escapeHtml(transferButtonTitle)}" ${canSelectTransferStop ? '' : 'disabled aria-disabled="true"'}>${escapeHtml(transferButtonText)}</button>
+      </div>
     </div>
   `;
 }
@@ -4388,6 +5929,41 @@ function saveStop(stop) {
   queuePreferenceSave();
 }
 
+function loadTransferStop() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(TRANSFER_STOP_KEY) || 'null');
+    if (isStopCoordinate(stored)) {
+      return normalizeStopForStorage(stored);
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function saveTransferStop(stop) {
+  if (isStopCoordinate(stop)) {
+    localStorage.setItem(TRANSFER_STOP_KEY, JSON.stringify(normalizeStopForStorage(stop)));
+  }
+}
+
+function loadTransferTargetLine() {
+  try {
+    return normalizeLine(localStorage.getItem(TRANSFER_TARGET_LINE_KEY) || '');
+  } catch {
+    return '';
+  }
+}
+
+function saveTransferTargetLine() {
+  if (state.transfer.targetLine) {
+    localStorage.setItem(TRANSFER_TARGET_LINE_KEY, state.transfer.targetLine);
+  } else {
+    localStorage.removeItem(TRANSFER_TARGET_LINE_KEY);
+  }
+}
+
 function loadFavoriteStops() {
   try {
     const stored = JSON.parse(localStorage.getItem('bussradar.favoriteStops') || '[]');
@@ -4525,6 +6101,32 @@ function cssString(value) {
 
 function registerServiceWorker() {
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('service-worker.js').catch(() => {});
+    let reloadedForWorker = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (reloadedForWorker || sessionStorage.getItem('bussradar.swReloaded') === '166') {
+        return;
+      }
+
+      reloadedForWorker = true;
+      sessionStorage.setItem('bussradar.swReloaded', '166');
+      window.location.reload();
+    });
+
+    navigator.serviceWorker.register('service-worker.js?v=166').then((registration) => {
+      registration.update?.();
+
+      if (registration.waiting) {
+        registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+      }
+
+      registration.addEventListener('updatefound', () => {
+        const worker = registration.installing;
+        worker?.addEventListener('statechange', () => {
+          if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+            worker.postMessage({ type: 'SKIP_WAITING' });
+          }
+        });
+      });
+    }).catch(() => {});
   }
 }

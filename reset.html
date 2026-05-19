@@ -9,10 +9,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="BussRadar">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <meta name="format-detection" content="telephone=no">
-  <meta name="referrer" content="strict-origin-when-cross-origin">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; worker-src 'self'; manifest-src 'self'; script-src 'self' https://unpkg.com; style-src 'self' 'unsafe-inline' https://unpkg.com; connect-src 'self' https://transport.tallinn.ee https://api.open-meteo.com https://r.jina.ai https://api.allorigins.win; img-src 'self' data: https://unpkg.com https://tile.openstreetmap.org https://*.basemaps.cartocdn.com;">
-  <title>BussRadar API</title>
+  <title>BussRadar uuendus</title>
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
   <link rel="icon" href="assets/favicon-32.png" sizes="32x32" type="image/png">
@@ -23,16 +20,31 @@
   <main class="auth-page">
     <section class="panel-block auth-card">
       <div class="block-heading">
-        <h1>BussRadar API</h1>
-        <span>Staatiline</span>
+        <h1>Uuendan kaarti</h1>
+        <span>v166</span>
       </div>
-      <p class="account-message">
-        GitHub Pages versioonis töötab API brauseris faili <strong>assets/js/static-api.js</strong> kaudu.
-      </p>
-      <a class="tool-button" href="index.html">
-        <span>Ava kaart</span>
-      </a>
+      <p class="account-message">Puhastan vana brauseri vahemälu ja avan uue kaardi.</p>
     </section>
   </main>
+
+  <script>
+    (async () => {
+      try {
+        if ('serviceWorker' in navigator) {
+          const registrations = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(registrations.map((registration) => registration.unregister()));
+        }
+
+        if ('caches' in window) {
+          const keys = await caches.keys();
+          await Promise.all(keys.map((key) => caches.delete(key)));
+        }
+      } catch {
+        // The reset page is best-effort; opening the fresh URL is still useful.
+      }
+
+      window.location.replace('index.html?fresh=166');
+    })();
+  </script>
 </body>
 </html>
