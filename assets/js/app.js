@@ -1,14 +1,21 @@
 const TALLINN_CENTER = [59.437, 24.7536];
 const DEFAULT_LINES = ['18', '40', '60'];
+const DEFAULT_LINES_BY_TYPE = {
+  bus: DEFAULT_LINES,
+  tram: ['1', '2', '3', '4', '5'],
+};
 const DEFAULT_STOP = { id: '1297', name: 'Laikmaa', lat: 59.43614, lon: 24.75755 };
 const REFRESH_SECONDS = 10;
 const WEATHER_REFRESH_MS = 10 * 60 * 1000;
 const GPS_REFRESH_MS = 5000;
+const TRANSPORT_TYPE_KEY = 'bussradar.transportType';
+const INITIAL_TRANSPORT_TYPE = loadTransportType();
 const THEME_KEY = 'bussradar.theme';
 const ONBOARDING_KEY = 'bussradar.onboardingSeen.v1';
 const TRANSFER_STOP_KEY = 'bussradar.transferStop';
 const TRANSFER_TARGET_LINE_KEY = 'bussradar.transferTargetLine';
-const TRANSFER_WALK_BUFFER_MINUTES = 2;
+const TRANSFER_WALK_BUFFER_MINUTES = 1;
+const TRANSFER_WEATHER_CODES_SLOW = [61, 63, 65, 71, 73, 75, 80, 81, 82, 95];
 const ROUTE_SIDE_STYLES = {
   south: { label: 'Lõuna pool', dashArray: null, dashOffset: '0', weight: 5, mapSide: 'south', priority: 0, sharedDash: 58, sharedGap: 0 },
   north: { label: 'Soome pool', dashArray: '1 13', dashOffset: '0', weight: 5, mapSide: 'north', priority: 1, sharedDash: 1, sharedGap: 13 },
@@ -37,12 +44,13 @@ const state = {
   vehicleMarkers: new Map(),
   mapStopMarkers: new Map(),
   favoriteStopMarkers: new Map(),
-  selectedLines: loadLines(),
+  transportType: INITIAL_TRANSPORT_TYPE,
+  selectedLines: loadLines(INITIAL_TRANSPORT_TYPE),
   lineColors: loadLineColors(),
   lineEmphasis: loadLineEmphasis(),
   selectedStop: loadStop(),
   scheduleAvailableLines: [],
-  scheduleLine: loadScheduleLine(),
+  scheduleLine: loadScheduleLine(INITIAL_TRANSPORT_TYPE),
   scheduleRoutes: [],
   scheduleRouteIndex: 0,
   scheduleStopIndex: 0,
@@ -76,6 +84,12 @@ const state = {
   countdownTimer: null,
   refreshRequestId: 0,
   lastWeatherFetch: 0,
+  weather: {
+    temp: null,
+    wind: 0,
+    precipitation: 0,
+    code: 0,
+  },
   deferredInstallPrompt: null,
   user: null,
   theme: loadTheme(),
@@ -97,6 +111,7 @@ const els = {};
 
 document.addEventListener('DOMContentLoaded', async () => {
   cacheElements();
+  updateTransportUi();
   applyTheme(state.theme);
   createMap();
   bindEvents();
@@ -111,10 +126,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 function cacheElements() {
   els.connectionStatus = document.querySelector('#connectionStatus');
+  els.transportModeToggle = document.querySelector('#transportModeToggle');
+  els.transportModeText = document.querySelector('#transportModeText');
+  els.vehiclePanelTitle = document.querySelector('#vehiclePanelTitle');
   els.vehicleCount = document.querySelector('#vehicleCount');
   els.lastUpdated = document.querySelector('#lastUpdated');
   els.nextRefresh = document.querySelector('#nextRefresh');
   els.lineForm = document.querySelector('#lineForm');
+  els.lineLabel = document.querySelector('#lineLabel');
   els.lineInput = document.querySelector('#lineInput');
   els.selectedLines = document.querySelector('#selectedLines');
   els.vehicleList = document.querySelector('#vehicleList');
@@ -149,6 +168,7 @@ function cacheElements() {
   els.transferResult = document.querySelector('#transferResult');
   els.scheduleForm = document.querySelector('#scheduleForm');
   els.scheduleLineSelect = document.querySelector('#scheduleLineSelect');
+  els.scheduleLineLabel = document.querySelector('#scheduleLineLabel');
   els.scheduleDirectionSelect = document.querySelector('#scheduleDirectionSelect');
   els.scheduleSummary = document.querySelector('#scheduleSummary');
   els.scheduleDirections = document.querySelector('#scheduleDirections');
@@ -224,6 +244,151 @@ function createMap() {
 function updateMapDensity() {
   if (!state.map) return;
   state.map.getContainer().classList.toggle('show-vehicle-labels', state.map.getZoom() >= 14);
+}
+
+function sanitizeTransportType(type) {
+  return type === 'tram' ? 'tram' : 'bus';
+}
+
+function activeTransportType() {
+  return sanitizeTransportType(state.transportType);
+}
+
+function transportLabel(type = activeTransportType()) {
+  return sanitizeTransportType(type) === 'tram' ? 'tramm' : 'buss';
+}
+
+function transportPluralLabel(type = activeTransportType()) {
+  return sanitizeTransportType(type) === 'tram' ? 'tramme' : 'busse';
+}
+
+function transportPluralNominativeLabel(type = activeTransportType()) {
+  return sanitizeTransportType(type) === 'tram' ? 'trammid' : 'bussid';
+}
+
+function transportPluralGenitiveLabel(type = activeTransportType()) {
+  return sanitizeTransportType(type) === 'tram' ? 'trammide' : 'busside';
+}
+
+function transportTitleLabel(type = activeTransportType()) {
+  return sanitizeTransportType(type) === 'tram' ? 'Tramm' : 'Buss';
+}
+
+function transportLineLabel(type = activeTransportType()) {
+  return sanitizeTransportType(type) === 'tram' ? 'Trammiliin' : 'Bussiliin';
+}
+
+function transportPanelTitle(type = activeTransportType()) {
+  return sanitizeTransportType(type) === 'tram' ? 'Valitud trammid' : 'Valitud bussid';
+}
+
+function transportIconName(type = activeTransportType()) {
+  return sanitizeTransportType(type) === 'tram' ? 'tram-front' : 'bus-front';
+}
+
+function vehicleTransportType(vehicle) {
+  return sanitizeTransportType(vehicle?.type || activeTransportType());
+}
+
+function routeTransportType(route) {
+  return sanitizeTransportType(route?.type || activeTransportType());
+}
+
+function routeBadgeModeClass(type = activeTransportType()) {
+  return sanitizeTransportType(type) === 'tram' ? ' tram' : '';
+}
+
+function departureTransportType(departure) {
+  return sanitizeTransportType(departure?.type || activeTransportType());
+}
+
+function transportLineKey(line, type = activeTransportType()) {
+  return `${sanitizeTransportType(type)}:${normalizeLine(String(line || ''))}`;
+}
+
+function updateTransportUi() {
+  const type = activeTransportType();
+  const tram = type === 'tram';
+  document.body?.classList.toggle('transport-tram', tram);
+  document.body?.classList.toggle('transport-bus', !tram);
+
+  if (els.transportModeToggle) {
+    const title = tram ? 'Lülita trammid välja' : 'Lülita trammid sisse';
+    els.transportModeToggle.classList.toggle('is-active', tram);
+    els.transportModeToggle.setAttribute('aria-pressed', tram ? 'true' : 'false');
+    els.transportModeToggle.setAttribute('aria-label', title);
+    els.transportModeToggle.title = title;
+    els.transportModeToggle.querySelector('i')?.setAttribute('data-lucide', 'tram-front');
+  }
+  if (els.transportModeText) {
+    els.transportModeText.textContent = 'Trammid';
+  }
+  if (els.vehiclePanelTitle) {
+    els.vehiclePanelTitle.textContent = transportPanelTitle(type);
+  }
+  if (els.lineLabel) {
+    els.lineLabel.textContent = transportLineLabel(type);
+  }
+  if (els.lineInput) {
+    els.lineInput.placeholder = tram ? 'nt 1' : 'nt 18';
+  }
+  if (els.scheduleLineLabel) {
+    els.scheduleLineLabel.textContent = transportLineLabel(type);
+  }
+  if (els.scheduleLineSelect) {
+    els.scheduleLineSelect.setAttribute('aria-label', `Vali ${transportLineLabel(type).toLocaleLowerCase('et')}i sõiduplaan`);
+  }
+
+  if (window.lucide) {
+    lucide.createIcons();
+  }
+}
+
+function setTransportType(type) {
+  const nextType = sanitizeTransportType(type);
+  if (nextType === activeTransportType()) {
+    return;
+  }
+
+  saveLines();
+  saveScheduleLine();
+  state.transportType = nextType;
+  localStorage.setItem(TRANSPORT_TYPE_KEY, nextType);
+  state.selectedLines = loadLines(nextType);
+  state.scheduleLine = loadScheduleLine(nextType);
+  state.scheduleAvailableLines = [];
+  state.scheduleRoutes = [];
+  state.scheduleRouteIndex = 0;
+  state.scheduleStopIndex = 0;
+  state.scheduleSelectedTripKey = '';
+  state.vehicles = [];
+  state.routes = [];
+  state.departures = [];
+  state.mapStops = [];
+  state.transfer.currentVehicleKey = '';
+  state.transfer.targetVehicleKey = '';
+  state.transfer.targetLine = '';
+  state.transfer.targetDepartureKey = '';
+  state.transfer.departures = [];
+  state.transfer.departureError = '';
+  state.transfer.departureRequestId += 1;
+  saveTransferTargetLine();
+  state.shouldFitVehicles = true;
+
+  updateTransportUi();
+  renderLineTags();
+  renderScheduleLineOptions();
+  renderTransferPanel();
+  state.vehicleLayer?.clearLayers();
+  state.routeLayer?.clearLayers();
+  state.mapStopLayer?.clearLayers();
+  state.vehicleMarkers.clear();
+  state.mapStopMarkers.clear();
+  fetchScheduleLines();
+  fetchSchedule();
+  fetchRoutes();
+  refreshAll();
+  queuePreferenceSave();
 }
 
 function setMobilePanelCollapsed(collapsed) {
@@ -516,6 +681,10 @@ function bindEvents() {
     startOnboarding({ force: true });
   });
 
+  els.transportModeToggle?.addEventListener('click', () => {
+    setTransportType(activeTransportType() === 'tram' ? 'bus' : 'tram');
+  });
+
   els.lineForm.addEventListener('submit', (event) => {
     event.preventDefault();
     const value = normalizeLine(els.lineInput.value);
@@ -728,6 +897,7 @@ function hasStoredPreferences(preferences) {
     || (Array.isArray(preferences.favoriteStops) && preferences.favoriteStops.length > 0)
     || Object.keys(preferences.lineColors || {}).length > 0
     || Object.keys(preferences.lineEmphasis || {}).length > 0
+    || preferences.transportType === 'tram'
     || preferences.theme === 'dark';
 }
 
@@ -735,6 +905,7 @@ function applyUserPreferences(preferences, reload = false) {
   const lines = Array.isArray(preferences.lines)
     ? preferences.lines.map((line) => normalizeLine(String(line))).filter(Boolean)
     : [];
+  state.transportType = sanitizeTransportType(preferences.transportType || state.transportType);
   if (lines.length > 0) {
     state.selectedLines = [...new Set(lines)];
   }
@@ -748,8 +919,10 @@ function applyUserPreferences(preferences, reload = false) {
     : [];
   state.lineColors = sanitizeLineColors(preferences.lineColors || {});
   state.lineEmphasis = sanitizeLineEmphasis(preferences.lineEmphasis || {});
+  localStorage.setItem(TRANSPORT_TYPE_KEY, state.transportType);
   setTheme(preferences.theme === 'dark' ? 'dark' : 'light', false);
   persistLocalPreferences();
+  updateTransportUi();
 
   els.selectedStopName.textContent = state.selectedStop.name;
   renderLineTags();
@@ -809,6 +982,7 @@ async function savePreferencesNow() {
 function preferencesPayload() {
   return {
     lines: state.selectedLines,
+    transportType: activeTransportType(),
     stop: state.selectedStop,
     favoriteStops: state.favoriteStops,
     lineColors: state.lineColors,
@@ -818,7 +992,11 @@ function preferencesPayload() {
 }
 
 function persistLocalPreferences() {
-  localStorage.setItem('bussradar.lines', JSON.stringify(state.selectedLines));
+  localStorage.setItem(TRANSPORT_TYPE_KEY, activeTransportType());
+  localStorage.setItem(linesStorageKey(activeTransportType()), JSON.stringify(state.selectedLines));
+  if (activeTransportType() === 'bus') {
+    localStorage.setItem('bussradar.lines', JSON.stringify(state.selectedLines));
+  }
   localStorage.setItem('bussradar.stop', JSON.stringify(state.selectedStop));
   localStorage.setItem('bussradar.favoriteStops', JSON.stringify(state.favoriteStops));
   localStorage.setItem('bussradar.lineColors', JSON.stringify(state.lineColors));
@@ -958,21 +1136,21 @@ async function fetchVehicles() {
     state.vehicles = [];
     renderVehicles();
     renderDelayPanel();
-    setStatus('Vali liin', false);
+    setStatus(`Vali ${transportLineLabel().toLocaleLowerCase('et')}`, false);
     return;
   }
 
-  setStatus('Laen busse', false);
+  setStatus(`Laen ${transportPluralLabel()}`, false);
   const params = new URLSearchParams({
     action: 'vehicles',
-    type: 'bus',
+    type: activeTransportType(),
     lines: state.selectedLines.join(','),
   });
 
   try {
     const data = await fetchJson(`api.html?${params.toString()}`);
     state.vehicles = (data.vehicles || []).filter(isVehicleCoordinate);
-    await ensureDelaySchedules(uniqueSortedLines(state.vehicles.map((vehicle) => vehicle.line)));
+    await ensureDelaySchedules(uniqueSortedLines(state.vehicles.map((vehicle) => vehicle.line)), activeTransportType());
     renderVehicles();
     renderDelayPanel();
     els.lastUpdated.textContent = timeNow();
@@ -983,23 +1161,25 @@ async function fetchVehicles() {
   }
 }
 
-async function ensureDelaySchedules(lines) {
+async function ensureDelaySchedules(lines, type = activeTransportType()) {
   const wantedLines = uniqueSortedLines(lines.map(normalizeLine).filter(Boolean));
-  const missingLines = wantedLines.filter((line) => !state.delayScheduleRoutes.has(line));
+  const normalizedType = sanitizeTransportType(type);
+  const missingLines = wantedLines.filter((line) => !state.delayScheduleRoutes.has(transportLineKey(line, normalizedType)));
   if (missingLines.length === 0) {
     return;
   }
 
   await Promise.all(missingLines.map(async (line) => {
+    const cacheKey = transportLineKey(line, normalizedType);
     try {
-      const params = new URLSearchParams({ action: 'schedule', line });
+      const params = new URLSearchParams({ action: 'schedule', type: normalizedType, line });
       const data = await fetchJson(`api.html?${params.toString()}`);
       const routes = (data.routes || [])
         .filter((route) => normalizeLine(String(route.line || '')) === line)
         .filter((route) => Array.isArray(route.stops) && route.stops.length >= 2 && route.times);
-      state.delayScheduleRoutes.set(line, routes);
+      state.delayScheduleRoutes.set(cacheKey, routes);
     } catch {
-      state.delayScheduleRoutes.set(line, []);
+      state.delayScheduleRoutes.set(cacheKey, []);
     }
   }));
 }
@@ -1015,7 +1195,7 @@ function renderVehicles() {
 
     const risk = vehicleDelayRisk(vehicle);
     const key = vehicleKey(vehicle);
-    const title = `Liin ${vehicle.line}`;
+    const title = `${vehicleTransportType(vehicle) === 'tram' ? 'Tramm' : 'Liin'} ${vehicle.line}`;
     const popupContent = vehiclePopup(vehicle, risk);
     const signature = vehicleIconSignature(vehicle, risk);
     activeKeys.add(key);
@@ -1063,6 +1243,7 @@ function renderVehicles() {
   renderVehicleList();
   renderTransferVehicleOptions('current');
   renderTransferVehicleOptions('target');
+  updateTransferVehicleHighlights();
   updateTransferResult();
 
   if (state.vehicles.length > 0 && state.shouldFitVehicles) {
@@ -1077,6 +1258,7 @@ function renderVehicles() {
 function vehicleIconSignature(vehicle, risk) {
   const profile = vehicleProfile(vehicle);
   return [
+    vehicleTransportType(vehicle),
     vehicle.line,
     shortText(vehicle.destination || '', 12),
     risk.level,
@@ -1091,7 +1273,7 @@ function updateVehicleMarkerElement(marker, vehicle) {
     return;
   }
 
-  const color = routeColor(vehicle.line);
+  const color = routeColor(vehicle.line, vehicleTransportType(vehicle));
   const bearing = Number.isFinite(Number(vehicle.bearing)) ? Number(vehicle.bearing) : 0;
   const pin = element.querySelector('.vehicle-pin');
   if (pin) {
@@ -1108,6 +1290,31 @@ function updateVehicleMarkerElement(marker, vehicle) {
   if (destination) {
     destination.textContent = shortText(vehicle.destination || '', 12) || vehicle.destination || 'Siht teadmata';
   }
+
+  applyTransferMarkerRole(marker, vehicle);
+}
+
+function updateTransferVehicleHighlights() {
+  if (!state.vehicleMarkers?.size) {
+    return;
+  }
+
+  state.vehicleMarkers.forEach((marker, key) => {
+    const vehicle = state.vehicles.find((item) => vehicleKey(item) === key);
+    if (vehicle) {
+      applyTransferMarkerRole(marker, vehicle);
+    }
+  });
+}
+
+function applyTransferMarkerRole(marker, vehicle) {
+  const key = vehicleKey(vehicle);
+  const isCurrent = key === state.transfer.currentVehicleKey;
+  const isTarget = key === state.transfer.targetVehicleKey;
+  const element = marker.getElement();
+  element?.classList.toggle('transfer-current', isCurrent);
+  element?.classList.toggle('transfer-target', isTarget);
+  marker.setZIndexOffset?.(isCurrent ? 1750 : isTarget ? 1650 : 1000);
 }
 
 function isVehicleCoordinate(vehicle) {
@@ -1151,7 +1358,7 @@ function renderMapStops() {
       return;
     }
 
-    const color = stopLineColor(stop) || MAP_STOP_FALLBACK_COLOR;
+  const color = stopLineColor(stop) || MAP_STOP_FALLBACK_COLOR;
     const marker = L.circleMarker([stop.lat, stop.lon], {
       pane: 'mapStopPane',
       radius: fullSize ? 5.8 : 4.4,
@@ -1473,9 +1680,10 @@ function renderTransferVehicleOptions(kind = 'current') {
   const vehicles = transferVehicleOptions();
   const selectedKey = kind === 'target' ? state.transfer.targetVehicleKey : state.transfer.currentVehicleKey;
   const selectedExists = vehicles.some((vehicle) => vehicleKey(vehicle) === selectedKey);
-  const placeholder = kind === 'target' ? 'Vali sihtbuss' : 'Vali praegune buss';
+  const vehicleName = transportLabel();
+  const placeholder = kind === 'target' ? `Vali siht${vehicleName}` : `Vali praegune ${vehicleName}`;
   const staleOption = selectedKey && !selectedExists
-    ? `<option value="${escapeHtml(selectedKey)}">Valitud buss pole kaardil</option>`
+    ? `<option value="${escapeHtml(selectedKey)}">Valitud ${vehicleName} pole kaardil</option>`
     : '';
 
   select.innerHTML = [
@@ -1506,19 +1714,40 @@ function transferVehicleLabel(vehicle) {
 
 function setTransferCurrentVehicle(key) {
   state.transfer.currentVehicleKey = String(key || '');
+  if (state.transfer.currentVehicleKey && state.transfer.currentVehicleKey === state.transfer.targetVehicleKey) {
+    state.transfer.targetVehicleKey = '';
+    state.transfer.targetDepartureKey = '';
+  }
   renderTransferVehicleOptions('current');
   const vehicle = selectedTransferVehicle();
   if (vehicle) {
-    ensureDelaySchedules([vehicle.line]).then(() => {
+    ensureDelaySchedules([vehicle.line], vehicleTransportType(vehicle)).then(() => {
+      chooseTransferDefaultDeparture({ force: true });
+      renderTransferDepartures();
+      updateTransferVehicleHighlights();
       updateTransferResult();
       refreshVehiclePopupContents();
     });
   }
+  chooseTransferDefaultDeparture({ force: true });
+  renderTransferDepartures();
+  updateTransferVehicleHighlights();
   updateTransferResult();
   refreshVehiclePopupContents();
 }
 
 function setTransferTargetVehicle(key) {
+  if (key && String(key) === state.transfer.currentVehicleKey) {
+    state.transfer.targetVehicleKey = '';
+    state.transfer.targetDepartureKey = '';
+    renderTransferVehicleOptions('target');
+    renderTransferDepartures();
+    updateTransferVehicleHighlights();
+    updateTransferResult();
+    refreshVehiclePopupContents();
+    return;
+  }
+
   state.transfer.targetVehicleKey = String(key || '');
   const vehicle = selectedTransferTargetVehicle();
   if (vehicle) {
@@ -1527,15 +1756,17 @@ function setTransferTargetVehicle(key) {
     if (els.transferTargetLine) {
       els.transferTargetLine.value = state.transfer.targetLine;
     }
-    ensureDelaySchedules([vehicle.line]).then(() => {
+    ensureDelaySchedules([vehicle.line], vehicleTransportType(vehicle)).then(() => {
+      updateTransferVehicleHighlights();
       updateTransferResult();
       refreshVehiclePopupContents();
     });
   }
 
-  chooseTransferDefaultDeparture();
+  chooseTransferDefaultDeparture({ force: true });
   renderTransferVehicleOptions('target');
   renderTransferDepartures();
+  updateTransferVehicleHighlights();
   updateTransferResult();
   refreshVehiclePopupContents();
 }
@@ -1549,8 +1780,9 @@ function setTransferTargetLine(value) {
     els.transferTargetLine.value = line;
   }
   renderTransferVehicleOptions('target');
-  chooseTransferDefaultDeparture();
+  chooseTransferDefaultDeparture({ force: true });
   renderTransferDepartures();
+  updateTransferVehicleHighlights();
   updateTransferResult();
   refreshVehiclePopupContents();
 }
@@ -1587,6 +1819,7 @@ function resetTransferSelection() {
   renderTransferVehicleOptions('current');
   renderTransferVehicleOptions('target');
   renderTransferDepartures();
+  updateTransferVehicleHighlights();
   updateTransferResult();
   refreshVehiclePopupContents();
 }
@@ -1757,13 +1990,19 @@ function onboardingSteps() {
       selector: '#map',
       icon: 'map',
       title: 'Kaart',
-      body: 'Siin näed busse, teekondi ja peatuseid. Vajuta bussile või peatusele, et avada täpsem info.',
+      body: 'Siin näed sõidukeid, teekondi ja peatuseid. Vajuta sõidukile või peatusele, et avada täpsem info.',
     },
     {
       selector: '#lineForm',
       icon: 'list-plus',
       title: 'Lisa liin',
       body: 'Sisesta liininumber ja lisa see kaardile. Valitud liinide värve ja nähtavust saad hiljem samas paneelis muuta.',
+    },
+    {
+      selector: '#transportModeToggle',
+      icon: 'tram-front',
+      title: 'Bussid ja trammid',
+      body: 'Lülitab kaardi bussi- ja trammirežiimi vahel. Režiim vahetab ka liinid, sõiduplaani, markerid ja ümberistumise arvutuse.',
     },
     {
       selector: '#scheduleToggle',
@@ -1793,7 +2032,7 @@ function onboardingSteps() {
       selector: '#refreshButton',
       icon: 'refresh-cw',
       title: 'Värskenda',
-      body: 'Uuendab busside asukohad, hilinemised ja väljumised käsitsi kohe ära.',
+      body: 'Uuendab sõidukite asukohad, hilinemised ja väljumised käsitsi kohe ära.',
     },
     {
       selector: '#helpButton',
@@ -2128,7 +2367,7 @@ async function fetchTransferDepartures(stop, { silent = false } = {}) {
     }
 
     state.transfer.departures = (data.departures || [])
-      .filter((departure) => departure.type === 'bus')
+      .filter((departure) => departureTransportType(departure) === activeTransportType())
       .map((departure, index) => ({
         ...departure,
         transferKey: transferDepartureKey(departure, index),
@@ -2160,7 +2399,7 @@ async function refreshTransferEstimate() {
   ].map((line) => normalizeLine(String(line || ''))).filter(Boolean);
 
   if (lines.length > 0) {
-    await ensureDelaySchedules(uniqueSortedLines(lines));
+    await ensureDelaySchedules(uniqueSortedLines(lines), activeTransportType());
   }
 
   if (state.transfer.stop) {
@@ -2185,14 +2424,15 @@ function renderTransferDepartures() {
     return;
   }
 
-  if (state.transfer.loadingDepartures) {
+  const targetVehicle = selectedTransferTargetVehicle();
+  if (state.transfer.loadingDepartures && !targetVehicle) {
     els.transferTargetDeparture.innerHTML = '<option value="">Laen väljumisi...</option>';
     els.transferTargetDeparture.value = '';
     state.transfer.targetDepartureKey = '';
     return;
   }
 
-  if (state.transfer.departureError) {
+  if (state.transfer.departureError && !targetVehicle) {
     els.transferTargetDeparture.innerHTML = '<option value="">Väljumisi ei saanud laadida</option>';
     els.transferTargetDeparture.value = '';
     state.transfer.targetDepartureKey = '';
@@ -2214,7 +2454,8 @@ function renderTransferDepartures() {
     : departures[0].transferKey;
 
   els.transferTargetDeparture.innerHTML = departures.map((departure) => {
-    return `<option value="${escapeHtml(departure.transferKey)}">${escapeHtml(transferDepartureLabel(departure))}</option>`;
+    const recommended = departure.transferKey === selectedKey;
+    return `<option value="${escapeHtml(departure.transferKey)}">${escapeHtml(transferDepartureLabel(departure, { recommended }))}</option>`;
   }).join('');
   els.transferTargetDeparture.value = selectedKey;
   state.transfer.targetDepartureKey = selectedKey;
@@ -2233,32 +2474,65 @@ function transferDepartureKey(departure, index) {
 
 function transferFilteredDepartures() {
   const targetLine = normalizeLine(state.transfer.targetLine || '');
-  const targetVehicle = selectedTransferTargetVehicle();
-  const targetVehicleId = String(targetVehicle?.id || '');
+  const arrival = currentTransferArrivalEstimate();
   return [...state.transfer.departures]
     .filter((departure) => !targetLine || normalizeLine(String(departure.line || '')) === targetLine)
     .sort((a, b) => {
-      const vehicleScoreA = targetVehicleId && String(a.vehicleId || '') === targetVehicleId ? 0 : 1;
-      const vehicleScoreB = targetVehicleId && String(b.vehicleId || '') === targetVehicleId ? 0 : 1;
       const waitA = transferDepartureWaitMinutes(a);
       const waitB = transferDepartureWaitMinutes(b);
-      return vehicleScoreA - vehicleScoreB
+      return transferDepartureSortScore(a, arrival) - transferDepartureSortScore(b, arrival)
         || (Number.isFinite(waitA) ? waitA : Infinity) - (Number.isFinite(waitB) ? waitB : Infinity);
     });
 }
 
-function transferDepartureLabel(departure) {
+function transferDepartureSortScore(departure, arrival = null) {
+  const wait = transferDepartureWaitMinutes(departure);
+  if (!Number.isFinite(wait)) {
+    return Infinity;
+  }
+
+  const targetVehicle = selectedTransferTargetVehicle();
+  if (isDepartureForVehicle(departure, targetVehicle)) {
+    return -10000 + wait / 100;
+  }
+
+  if (!arrival || arrival.passed || !Number.isFinite(arrival.waitMinutes)) {
+    return wait;
+  }
+
+  const margin = wait - arrival.waitMinutes - transferWalkBufferMinutes();
+  const reachScore = margin >= 0 ? margin : 90 + Math.abs(margin) * 2;
+  return reachScore + wait / 100;
+}
+
+function currentTransferArrivalEstimate() {
+  const vehicle = selectedTransferVehicle();
+  if (!vehicle || !state.transfer.stop) {
+    return null;
+  }
+
+  return estimateVehicleArrivalAtTransferStop(vehicle, state.transfer.stop, { requireScheduledStop: true });
+}
+
+function isDepartureForVehicle(departure, vehicle) {
+  return Boolean(vehicle && departure && String(departure.vehicleId || '') === String(vehicle.id || ''));
+}
+
+function transferDepartureLabel(departure, { recommended = false } = {}) {
   const wait = transferDepartureWaitMinutes(departure);
   const waitLabel = Number.isFinite(wait) ? `${Math.max(0, Math.round(wait))} min` : departure.expectedTime;
   const vehicle = departure.vehicleId ? ` · ${departure.vehicleId}` : '';
   const targetVehicle = selectedTransferTargetVehicle();
-  const sameVehicle = targetVehicle && String(departure.vehicleId || '') === String(targetVehicle.id || '')
-    ? ' · sama buss'
+  let sameVehicle = isDepartureForVehicle(departure, targetVehicle)
+    ? ` · sama ${transportLabel()}`
     : '';
+  if (recommended) {
+    sameVehicle += ' · soovitatud';
+  }
   return `${departure.line} · ${departure.destination || 'Siht teadmata'} · ${waitLabel}${vehicle}${sameVehicle}`;
 }
 
-function chooseTransferDefaultDeparture() {
+function chooseTransferDefaultDeparture({ force = false } = {}) {
   const departures = transferFilteredDepartures();
   const targetVehicle = selectedTransferTargetVehicle();
   if (targetVehicle) {
@@ -2271,7 +2545,7 @@ function chooseTransferDefaultDeparture() {
     }
   }
 
-  if (departures.some((departure) => departure.transferKey === state.transfer.targetDepartureKey)) {
+  if (!force && departures.some((departure) => departure.transferKey === state.transfer.targetDepartureKey)) {
     return;
   }
 
@@ -2290,6 +2564,298 @@ function selectedTransferDeparture() {
   return transferFilteredDepartures().find((departure) => departure.transferKey === state.transfer.targetDepartureKey) || null;
 }
 
+function resolveTransferTargetTiming(departure, targetVehicle, stop) {
+  const targetArrival = targetVehicle ? estimateVehicleArrivalAtTransferStop(targetVehicle, stop, { requireScheduledStop: true }) : null;
+  const vehicleMatched = isDepartureForVehicle(departure, targetVehicle);
+  const targetName = `siht${transportLabel(targetVehicle ? vehicleTransportType(targetVehicle) : activeTransportType())}`;
+
+  if (targetVehicle && targetArrival?.passed) {
+    return {
+      method: 'passed',
+      label: `${targetName} on peatusest möödas`,
+      passed: true,
+      waitMinutes: NaN,
+      clock: 'möödas',
+      confidence: targetArrival.confidence,
+      line: targetVehicle.line || state.transfer.targetLine || '',
+      targetVehicle,
+      departure: null,
+      targetArrival,
+      directionHeading: targetArrival.directionHeading,
+      vehicleMatched,
+    };
+  }
+
+  if (targetVehicle && !targetArrival && !vehicleMatched) {
+    return {
+      method: 'no-stop',
+      label: `${targetName}i peatumine kinnitamata`,
+      noStop: true,
+      waitMinutes: NaN,
+      clock: 'ei peatu',
+      confidence: 0,
+      line: targetVehicle.line || state.transfer.targetLine || '',
+      targetVehicle,
+      departure: null,
+      targetArrival: null,
+      vehicleMatched: false,
+    };
+  }
+
+  if (targetVehicle && targetArrival && !vehicleMatched) {
+    return {
+      method: targetArrival.method,
+      label: targetArrival.method === 'schedule' ? `${targetName}i GPS + sõiduplaan` : `${targetName}i GPS kaugus`,
+      waitMinutes: targetArrival.waitMinutes,
+      clock: targetArrival.arrivalClock,
+      confidence: targetArrival.confidence,
+      line: targetVehicle.line || state.transfer.targetLine || '',
+      targetVehicle,
+      departure: null,
+      targetArrival,
+      directionHeading: targetArrival.directionHeading,
+      vehicleMatched: false,
+    };
+  }
+
+  if (departure) {
+    const waitMinutes = transferDepartureWaitMinutes(departure);
+    return {
+      method: 'departure',
+      label: vehicleMatched ? 'Peatuse live-väljumine' : 'Peatuse väljumine',
+      waitMinutes,
+      clock: departure.expectedTime || minutesToClock(Math.round(currentMinutesOfDay() + waitMinutes)),
+      confidence: vehicleMatched || departure.vehicleId ? 0.88 : 0.76,
+      line: departure.line || targetVehicle?.line || state.transfer.targetLine || '',
+      targetVehicle,
+      departure,
+      targetArrival: vehicleMatched ? targetArrival : null,
+      directionHeading: targetArrival?.directionHeading,
+      vehicleMatched,
+    };
+  }
+
+  if (targetArrival) {
+    return {
+      method: targetArrival.method,
+      label: targetArrival.method === 'schedule' ? `${targetName}i GPS + sõiduplaan` : `${targetName}i GPS kaugus`,
+      waitMinutes: targetArrival.waitMinutes,
+      clock: targetArrival.arrivalClock,
+      confidence: targetArrival.confidence,
+      line: targetVehicle?.line || state.transfer.targetLine || '',
+      targetVehicle,
+      departure: null,
+      targetArrival,
+      directionHeading: targetArrival.directionHeading,
+      vehicleMatched: false,
+    };
+  }
+
+  return null;
+}
+
+function transferWalkBufferMinutes() {
+  const weather = state.weather || {};
+  const temp = Number(weather.temp);
+  const wind = Number(weather.wind || 0);
+  const precipitation = Number(weather.precipitation || 0);
+  const code = Number(weather.code || 0);
+  let buffer = TRANSFER_WALK_BUFFER_MINUTES;
+
+  if (precipitation > 0.4 || TRANSFER_WEATHER_CODES_SLOW.includes(code)) {
+    buffer += 0.75;
+  }
+  if (wind > 30 || (Number.isFinite(temp) && temp < -8)) {
+    buffer += 0.5;
+  }
+
+  return clampNumber(buffer, TRANSFER_WALK_BUFFER_MINUTES, 4);
+}
+
+function transferEstimateConfidence(arrival, targetTiming, gpsAge, targetGpsAge) {
+  const targetConfidence = Number(targetTiming?.confidence || 0.6);
+  const base = Number(arrival?.confidence || 0.45) * 0.62 + targetConfidence * 0.38;
+  const stalePenalty = clampNumber(Number(gpsAge || 0) / 700 + Number(targetGpsAge || 0) / 900, 0, 0.22);
+  return clampNumber(base - stalePenalty, 0.18, 0.95);
+}
+
+function transferProbabilityFromMargin(margin, confidence) {
+  const safeConfidence = clampNumber(Number(confidence || 0), 0.18, 0.95);
+  const confidenceLift = (safeConfidence - 0.65) * 12;
+
+  if (margin >= 0) {
+    return Math.round(clampNumber(72 + (1 - Math.exp(-margin / 4)) * 22 + confidenceLift, 62, 97));
+  }
+
+  return Math.round(clampNumber(48 + margin * 18 + (safeConfidence - 0.65) * 10, 3, 68));
+}
+
+function transferPositionMargin(arrival, targetTiming, buffer) {
+  const targetArrival = targetTiming?.targetArrival;
+  const currentMeters = Number(arrival?.routeMetersToStop);
+  const targetMeters = Number(targetArrival?.routeMetersToStop);
+  if (!Number.isFinite(currentMeters) || !Number.isFinite(targetMeters)) {
+    return null;
+  }
+
+  const distanceDelta = targetMeters - currentMeters;
+  if (Math.abs(distanceDelta) < 80) {
+    return null;
+  }
+
+  const speedMpm = transferMapSpeedMetersPerMinute(arrival?.vehicle, targetTiming?.targetVehicle);
+  const rawLeadMinutes = distanceDelta / speedMpm;
+  return {
+    margin: rawLeadMinutes - buffer,
+    leadMinutes: rawLeadMinutes,
+    distanceDelta,
+    speedMpm,
+  };
+}
+
+function transferEffectiveMargin(scheduleMargin, positionMargin) {
+  if (!positionMargin || !Number.isFinite(positionMargin.margin)) {
+    return scheduleMargin;
+  }
+
+  const mapMargin = positionMargin.margin;
+  if (!Number.isFinite(scheduleMargin) || Math.abs(mapMargin - scheduleMargin) <= 6) {
+    return mapMargin;
+  }
+
+  return scheduleMargin * 0.45 + mapMargin * 0.55;
+}
+
+function transferMapSpeedMetersPerMinute(...vehicles) {
+  const speeds = vehicles
+    .map((vehicle) => Number(vehicle?.speed))
+    .filter((speed) => Number.isFinite(speed) && speed > 5)
+    .map((speed) => clampNumber(speed * 1000 / 60, 160, 520));
+
+  if (speeds.length) {
+    return speeds.reduce((sum, speed) => sum + speed, 0) / speeds.length;
+  }
+
+  return 260;
+}
+
+function transferPositionConfidence(positionMargin, gpsAge, targetGpsAge) {
+  const distanceLift = Math.min(0.16, Math.abs(Number(positionMargin?.distanceDelta || 0)) / 7500);
+  const stalePenalty = clampNumber((Number(gpsAge || 0) + Number(targetGpsAge || 0)) / 1800, 0, 0.18);
+  return clampNumber(0.68 + distanceLift - stalePenalty, 0.5, 0.9);
+}
+
+function transferMapAssurance(arrival, targetTiming, currentVehicle, targetVehicle, rawGapMinutes, safeMargin, positionMargin) {
+  const targetArrival = targetTiming?.targetArrival;
+  if (!currentVehicle || !targetVehicle || !arrival || !targetArrival) {
+    return null;
+  }
+  if (arrival.method !== 'schedule' || targetArrival.method !== 'schedule') {
+    return null;
+  }
+  if (!Number.isFinite(rawGapMinutes) || rawGapMinutes < 3 || !Number.isFinite(safeMargin) || safeMargin < 0.8) {
+    return null;
+  }
+
+  const currentHeading = transferEstimatedHeading(currentVehicle, arrival);
+  const targetHeading = transferEstimatedHeading(targetVehicle, targetArrival);
+  const headingGap = Number.isFinite(currentHeading) && Number.isFinite(targetHeading)
+    ? bearingDifference(currentHeading, targetHeading)
+    : NaN;
+  if (Number.isFinite(headingGap) && headingGap > 70) {
+    return null;
+  }
+
+  const currentMeters = Number(arrival.routeMetersToStop);
+  const targetMeters = Number(targetArrival.routeMetersToStop);
+  const distanceLead = Number.isFinite(currentMeters) && Number.isFinite(targetMeters)
+    ? targetMeters - currentMeters
+    : NaN;
+  if (Number.isFinite(distanceLead) && distanceLead < -120 && rawGapMinutes < 5) {
+    return null;
+  }
+
+  const maxGpsAge = Math.max(Number(currentVehicle.ageSeconds || 0), Number(targetVehicle.ageSeconds || 0));
+  const ageCap = maxGpsAge <= 90 ? 98 : maxGpsAge <= 180 ? 96 : maxGpsAge <= 300 ? 94 : 90;
+  const gapBonus = clampNumber((rawGapMinutes - 3) * 2.4, 0, 8);
+  const marginBonus = clampNumber(safeMargin * 1.1, 0, 4);
+  const distanceBonus = Number.isFinite(distanceLead) ? clampNumber(distanceLead / 700, 0, 4) : 0;
+  const mapBonus = positionMargin ? 1.5 : 0;
+
+  return {
+    confidence: clampNumber(0.82 + gapBonus / 45 + distanceBonus / 60 - maxGpsAge / 2600, 0.72, 0.95),
+    probability: Math.round(Math.min(ageCap, 89 + gapBonus + marginBonus + distanceBonus + mapBonus)),
+  };
+}
+
+function transferVehicleBearing(vehicle) {
+  const bearing = Number(vehicle?.bearing);
+  return Number.isFinite(bearing) && bearing >= 0 && bearing < 360 ? bearing : NaN;
+}
+
+function transferVehicleStopDistance(vehicle, stop) {
+  if (!isVehicleCoordinate(vehicle) || !isStopCoordinate(stop)) {
+    return NaN;
+  }
+
+  return distanceMeters(vehicle.lat, vehicle.lon, stop.lat, stop.lon);
+}
+
+function transferVehiclesRelevantToStop(currentVehicle, targetVehicle, stop) {
+  const currentDistance = transferVehicleStopDistance(currentVehicle, stop);
+  const targetDistance = transferVehicleStopDistance(targetVehicle, stop);
+  if (!Number.isFinite(currentDistance) || !Number.isFinite(targetDistance)) {
+    return false;
+  }
+
+  return currentDistance <= 12000 && targetDistance <= 12000;
+}
+
+function transferEstimatedHeading(vehicle, estimate) {
+  const gpsBearing = transferVehicleBearing(vehicle);
+  if (Number.isFinite(gpsBearing)) {
+    return gpsBearing;
+  }
+
+  const routeHeading = Number(estimate?.vehicleHeading ?? estimate?.directionHeading);
+  return Number.isFinite(routeHeading) ? routeHeading : NaN;
+}
+
+function transferLiveVehiclesOpposite(currentVehicle, targetVehicle, stop, arrival, targetTiming) {
+  if (!currentVehicle || !targetVehicle || !transferVehiclesRelevantToStop(currentVehicle, targetVehicle, stop)) {
+    return false;
+  }
+
+  const currentHeading = transferEstimatedHeading(currentVehicle, arrival);
+  const targetHeading = transferEstimatedHeading(targetVehicle, targetTiming?.targetArrival);
+  if (!Number.isFinite(currentHeading) || !Number.isFinite(targetHeading)) {
+    return false;
+  }
+
+  return bearingDifference(currentHeading, targetHeading) >= 130;
+}
+
+function transferOppositeDirection(arrival, targetTiming, currentVehicle = null, targetVehicle = null, stop = null) {
+  if (transferLiveVehiclesOpposite(currentVehicle, targetVehicle, stop, arrival, targetTiming)) {
+    return true;
+  }
+
+  const currentVehicleHeading = Number(arrival?.vehicleHeading);
+  const targetVehicleHeading = Number(targetTiming?.targetArrival?.vehicleHeading);
+  if (Number.isFinite(currentVehicleHeading) && Number.isFinite(targetVehicleHeading)
+    && bearingDifference(currentVehicleHeading, targetVehicleHeading) >= 135) {
+    return true;
+  }
+
+  const currentHeading = Number(arrival?.directionHeading);
+  const targetHeading = Number(targetTiming?.directionHeading ?? targetTiming?.targetArrival?.directionHeading);
+  if (!Number.isFinite(currentHeading) || !Number.isFinite(targetHeading)) {
+    return false;
+  }
+
+  return bearingDifference(currentHeading, targetHeading) >= 135;
+}
+
 function updateTransferResult() {
   const result = calculateTransferChance();
   updateTransferSummary(result);
@@ -2303,7 +2869,7 @@ function updateTransferResult() {
     return;
   }
 
-  const errorClass = result.status === 'error' || result.status === 'unavailable' ? 'error' : '';
+  const errorClass = ['error', 'unavailable', 'missed', 'noStop', 'oppositeDirection'].includes(result.status) ? 'error' : '';
   els.transferResult.innerHTML = `<div class="empty-state ${errorClass}">${escapeHtml(result.message)}</div>`;
 }
 
@@ -2340,6 +2906,21 @@ function updateTransferSummary(result) {
     return;
   }
 
+  if (result.status === 'missed') {
+    els.transferSummary.textContent = 'Peatus möödas';
+    return;
+  }
+
+  if (result.status === 'noStop') {
+    els.transferSummary.textContent = 'Ei peatu siin';
+    return;
+  }
+
+  if (result.status === 'oppositeDirection') {
+    els.transferSummary.textContent = 'Vastassuund';
+    return;
+  }
+
   const selectedCount = [
     state.transfer.currentVehicleKey,
     state.transfer.stop?.id,
@@ -2349,52 +2930,93 @@ function updateTransferSummary(result) {
 }
 
 function calculateTransferChance() {
+  const kind = transportLabel();
+  const targetKind = `siht${kind}`;
   const vehicle = selectedTransferVehicle();
   if (!vehicle) {
-    return { status: 'missing', message: 'Vali buss, mille peal oled' };
+    return { status: 'missing', message: `Vali ${kind}, mille peal oled` };
+  }
+
+  if (state.transfer.targetVehicleKey && state.transfer.targetVehicleKey === state.transfer.currentVehicleKey) {
+    return { status: 'missing', message: `Vali ${targetKind}iks teine ${kind}` };
   }
 
   if (!state.transfer.stop) {
     return { status: 'missing', message: 'Vali ümberistumise peatus' };
   }
 
-  if (state.transfer.loadingDepartures) {
+  const targetVehicle = selectedTransferTargetVehicle();
+  if (state.transfer.loadingDepartures && !targetVehicle) {
     return { status: 'loading', message: 'Laen selle peatuse väljumisi...' };
   }
 
-  if (state.transfer.departureError) {
+  if (state.transfer.departureError && !targetVehicle) {
     return { status: 'error', message: state.transfer.departureError };
   }
 
   const departure = selectedTransferDeparture();
-  const targetVehicle = selectedTransferTargetVehicle();
   if (!departure && !targetVehicle) {
-    return { status: 'missing', message: 'Vali buss, mille peale tahad jõuda' };
+    return { status: 'missing', message: `Vali ${kind}, mille peale tahad jõuda` };
   }
 
-  const arrival = estimateVehicleArrivalAtTransferStop(vehicle, state.transfer.stop);
+  const arrival = estimateVehicleArrivalAtTransferStop(vehicle, state.transfer.stop, { requireScheduledStop: true });
   if (!arrival) {
-    return { status: 'unavailable', message: 'Praeguse bussi ETA-d ei saanud piisavalt täpselt leida' };
+    return { status: 'noStop', message: `${vehicle.line || `Sinu ${kind}`} peatumist peatuses ${state.transfer.stop.name || ''} ei saanud kinnitada` };
+  }
+  if (arrival.passed) {
+    return { status: 'missed', message: `${vehicle.line || `Sinu ${kind}`} on ${state.transfer.stop.name || 'ümberistumise peatusest'} juba möödas` };
   }
 
-  const targetArrival = departure
-    ? null
-    : estimateVehicleArrivalAtTransferStop(targetVehicle, state.transfer.stop);
-  if (!departure && !targetArrival) {
-    return { status: 'unavailable', message: 'Sihtbussi ETA-d ei saanud selle peatuse jaoks leida' };
+  const targetTiming = resolveTransferTargetTiming(departure, targetVehicle, state.transfer.stop);
+  if (!targetTiming) {
+    return { status: 'unavailable', message: `${targetKind}i ETA-d ei saanud selle peatuse jaoks leida` };
   }
-
-  const targetWait = departure ? transferDepartureWaitMinutes(departure) : targetArrival.waitMinutes;
+  if (targetTiming.noStop) {
+    return { status: 'noStop', message: `${targetTiming.line || targetKind} ei peatu valitud peatuses ${state.transfer.stop.name || ''}` };
+  }
+  if (transferOppositeDirection(arrival, targetTiming, vehicle, targetVehicle, state.transfer.stop)) {
+    return {
+      status: 'oppositeDirection',
+      message: `${vehicle.line || `Sinu ${kind}`} ja ${targetTiming.line || targetKind} liiguvad GPS-i järgi vastassuunas`,
+    };
+  }
+  if (targetTiming.passed) {
+    return { status: 'missed', message: `${targetTiming.line || targetKind} on ${state.transfer.stop.name || 'ümberistumise peatusest'} juba möödas` };
+  }
+  const targetWait = targetTiming.waitMinutes;
   if (!Number.isFinite(targetWait)) {
-    return { status: 'unavailable', message: 'Sihtbussi väljumisaega ei saanud lugeda' };
+    return { status: 'unavailable', message: `${targetKind}i väljumisaega ei saanud lugeda` };
   }
 
-  const margin = targetWait - arrival.waitMinutes - TRANSFER_WALK_BUFFER_MINUTES;
+  const buffer = transferWalkBufferMinutes();
+  const rawGapMinutes = targetWait - arrival.waitMinutes;
+  const scheduleMargin = rawGapMinutes - buffer;
+  const positionMargin = transferPositionMargin(arrival, targetTiming, buffer);
+  const margin = transferEffectiveMargin(scheduleMargin, positionMargin);
   const gpsAge = Number(vehicle.ageSeconds || 0);
-  const uncertainty = clampNumber(2.1 + (1 - arrival.confidence) * 5 + gpsAge / 90, 2.1, 7.5);
-  let probability = Math.round(100 / (1 + Math.exp(-margin / uncertainty)));
-  if (arrival.method === 'distance') {
-    probability = Math.min(probability, 72);
+  const targetGpsAge = Number(targetVehicle?.ageSeconds || 0);
+  const mapAssurance = transferMapAssurance(arrival, targetTiming, vehicle, targetVehicle, rawGapMinutes, margin, positionMargin);
+  let confidence = transferEstimateConfidence(arrival, targetTiming, gpsAge, targetGpsAge);
+  if (positionMargin) {
+    confidence = Math.max(confidence, transferPositionConfidence(positionMargin, gpsAge, targetGpsAge));
+  }
+  if (mapAssurance) {
+    confidence = Math.max(confidence, mapAssurance.confidence);
+  }
+  let probability = transferProbabilityFromMargin(margin, confidence);
+  if (mapAssurance) {
+    probability = Math.max(probability, mapAssurance.probability);
+  }
+  if (arrival.method === 'distance' || targetTiming.method === 'distance') {
+    probability = Math.min(probability, 76);
+  }
+  if (targetTiming.method === 'departure' && !targetTiming.vehicleMatched) {
+    probability = Math.min(probability, 90);
+  }
+  if (confidence < 0.5) {
+    probability = Math.min(probability, 78);
+  } else if (confidence < 0.65) {
+    probability = Math.min(probability, 88);
   }
   probability = clampNumber(probability, 3, 97);
 
@@ -2404,14 +3026,22 @@ function calculateTransferChance() {
     level,
     probability,
     margin,
+    scheduleMargin,
+    rawGapMinutes,
+    positionMargin,
+    mapAssurance,
+    buffer,
+    confidence,
     vehicle,
-    departure,
+    departure: targetTiming.departure,
     targetVehicle,
-    targetArrival,
-    targetLine: departure?.line || targetVehicle?.line || state.transfer.targetLine || '',
+    targetArrival: targetTiming.targetArrival,
+    targetLine: targetTiming.line || state.transfer.targetLine || '',
     arrival,
     targetWait,
-    targetClock: departure?.expectedTime || targetArrival?.arrivalClock || minutesToClock(Math.round(currentMinutesOfDay() + targetWait)),
+    targetClock: targetTiming.clock || minutesToClock(Math.round(currentMinutesOfDay() + targetWait)),
+    targetMethod: targetTiming.method,
+    targetLabel: targetTiming.label,
   };
 }
 
@@ -2419,7 +3049,10 @@ function renderTransferChance(result) {
   const title = transferOutcomeTitle(result);
   const marginLabel = transferMarginLabel(result.margin);
   const methodLabel = transferMethodLabel(result);
+  const confidenceLabel = transferConfidenceLabel(result.confidence);
+  const advice = transferAdviceText(result);
   const stopName = state.transfer.stop?.name || 'peatus';
+  const targetLabel = result.targetLine || `siht${transportLabel()}i`;
 
   return `
     <article class="transfer-card ${result.level}">
@@ -2429,7 +3062,8 @@ function renderTransferChance(result) {
       </div>
       <div class="transfer-card-main">
         <strong>${escapeHtml(title)}</strong>
-        <span>${escapeHtml(result.vehicle.line)} jõuab ${escapeHtml(stopName)} umbes ${escapeHtml(result.arrival.arrivalClock)}; ${escapeHtml(result.targetLine || 'sihtbuss')} väljub ${escapeHtml(result.targetClock)}.</span>
+        <span>${escapeHtml(result.vehicle.line)} jõuab ${escapeHtml(stopName)} umbes ${escapeHtml(result.arrival.arrivalClock)}; ${escapeHtml(targetLabel)} väljub ${escapeHtml(result.targetClock)}.</span>
+        <span>${escapeHtml(advice)}</span>
         <i class="transfer-probability-bar" style="--chance: ${clampNumber(result.probability, 0, 100)}%"></i>
       </div>
     </article>
@@ -2437,7 +3071,9 @@ function renderTransferChance(result) {
       <span>${escapeHtml(marginLabel)}</span>
       <span>Saabub ${escapeHtml(result.arrival.arrivalClock)}</span>
       <span>Siht ${escapeHtml(result.targetClock)}</span>
-      <span>Puhver ${TRANSFER_WALK_BUFFER_MINUTES} min</span>
+      ${result.positionMargin ? `<span>${escapeHtml(transferPositionMarginLabel(result.positionMargin))}</span>` : ''}
+      <span>Puhver ${formatTransferMinutes(result.buffer)}</span>
+      <span>${escapeHtml(confidenceLabel)}</span>
       <span>${escapeHtml(methodLabel)}</span>
     </div>
   `;
@@ -2457,7 +3093,39 @@ function transferOutcomeTitle(result) {
 }
 
 function transferMethodLabel(result) {
-  return result?.arrival?.method === 'schedule' ? 'GPS + sõiduplaan' : 'GPS kaugus';
+  if (result?.positionMargin) {
+    return 'kaart + GPS-asukoht';
+  }
+
+  const sourceKind = transportLabel(result?.vehicle ? vehicleTransportType(result.vehicle) : activeTransportType());
+  const targetKind = transportLabel(result?.targetVehicle ? vehicleTransportType(result.targetVehicle) : activeTransportType());
+  const source = result?.arrival?.method === 'schedule' ? `oma ${sourceKind}: GPS + sõiduplaan` : `oma ${sourceKind}: GPS kaugus`;
+  const target = result?.targetLabel || (result?.targetMethod === 'departure' ? 'peatuse väljumine' : `siht${targetKind}i GPS`);
+  return `${source} · ${target}`;
+}
+
+function transferConfidenceLabel(confidence) {
+  const percent = Math.round(clampNumber(Number(confidence || 0), 0, 1) * 100);
+  if (percent >= 78) {
+    return `Kindlus ${percent}%`;
+  }
+  if (percent >= 55) {
+    return `Keskmine kindlus ${percent}%`;
+  }
+  return `Madal kindlus ${percent}%`;
+}
+
+function transferAdviceText(result) {
+  if (result.probability >= 85) {
+    return 'Varu on hea, ümberistumine peaks rahulikult õnnestuma.';
+  }
+  if (result.probability >= 70) {
+    return 'Tõenäoliselt jõuad, aga ära jää peatuses pikalt ootama.';
+  }
+  if (result.probability >= 40) {
+    return 'Napikas: väike hilinemine või aeglane liikumine võib plaani rikkuda.';
+  }
+  return `Parem vali hilisem siht${transportLabel()} või teine ümberistumise peatus.`;
 }
 
 function transferMarginLabel(margin) {
@@ -2469,13 +3137,40 @@ function transferMarginLabel(margin) {
   return `Puudu ${Math.abs(rounded)} min`;
 }
 
-function estimateVehicleArrivalAtTransferStop(vehicle, stop) {
-  return estimateVehicleScheduleArrival(vehicle, stop) || estimateVehicleDistanceArrival(vehicle, stop);
+function formatTransferMinutes(value) {
+  const rounded = Math.round(Number(value || 0) * 10) / 10;
+  return Number.isInteger(rounded) ? `${rounded} min` : `${rounded.toFixed(1)} min`;
+}
+
+function transferPositionMarginLabel(positionMargin) {
+  const minutes = Number(positionMargin?.leadMinutes);
+  if (!Number.isFinite(minutes)) {
+    return 'Kaardi asukoht';
+  }
+
+  const rounded = Math.round(minutes);
+  if (rounded >= 0) {
+    return `Kaart +${rounded} min`;
+  }
+  return `Kaart ${rounded} min`;
+}
+
+function estimateVehicleArrivalAtTransferStop(vehicle, stop, { requireScheduledStop = false } = {}) {
+  const scheduleArrival = estimateVehicleScheduleArrival(vehicle, stop);
+  if (scheduleArrival?.passed) {
+    return scheduleArrival;
+  }
+
+  if (requireScheduledStop) {
+    return scheduleArrival || null;
+  }
+
+  return scheduleArrival || estimateVehicleDistanceArrival(vehicle, stop);
 }
 
 function estimateVehicleScheduleArrival(vehicle, stop) {
   const line = normalizeLine(vehicle.line || '');
-  const routes = state.delayScheduleRoutes.get(line) || [];
+  const routes = state.delayScheduleRoutes.get(transportLineKey(line, vehicleTransportType(vehicle))) || [];
   const gpsAge = Number(vehicle.ageSeconds || 0);
   const destination = normalizeScheduleText(vehicle.destination || '');
 
@@ -2486,8 +3181,30 @@ function estimateVehicleScheduleArrival(vehicle, stop) {
       return null;
     }
 
-    if (transferIndex < position.controlStopIndex || (transferIndex === position.stopIndex && position.ratio > 0.35)) {
+    const destinationScore = scheduleDestinationMatchScore(route, destination);
+    const bearingGap = vehicleBearingDifference(vehicle, position.heading);
+    const bearingPenalty = Number.isFinite(bearingGap) ? Math.min(180, bearingGap) * 4 : 0;
+    const bearingConfidencePenalty = Number.isFinite(bearingGap) ? bearingGap / 650 : 0;
+    const speed = Number(vehicle.speed);
+    if (Number.isFinite(speed) && speed > 4 && Number.isFinite(bearingGap) && bearingGap >= 145) {
       return null;
+    }
+    if (transferIndex < position.controlStopIndex || (transferIndex === position.stopIndex && position.ratio > 0.35)) {
+      return {
+        method: 'schedule',
+        route,
+        passed: true,
+        waitMinutes: NaN,
+        arrivalClock: 'möödas',
+        confidence: clampNumber(0.78 - position.distanceMeters / 1600 - gpsAge / 700 - bearingConfidencePenalty - (destinationScore === 0 ? 0.08 : 0), 0.42, 0.86),
+        vehicle,
+        vehicleHeading: position.heading,
+        directionHeading: routeHeadingAtStop(route, transferIndex),
+        positionDistance: position.distanceMeters,
+        destinationScore,
+        bearingGap,
+        matchScore: position.distanceMeters + bearingPenalty - destinationScore * 700,
+      };
     }
 
     const delay = scheduleDelayAtPosition(route, position);
@@ -2502,10 +3219,9 @@ function estimateVehicleScheduleArrival(vehicle, stop) {
       return null;
     }
 
-    const destinationScore = scheduleDestinationMatchScore(route, destination);
     const pathMeters = routeDistanceFromPositionToStop(route, position, transferIndex);
     const waitMinutes = minutesUntilScheduleTime(scheduledTransferTime + delay.delayMinutes);
-    const confidence = clampNumber(0.9 - position.distanceMeters / 1400 - gpsAge / 600 - (destinationScore === 0 ? 0.08 : 0), 0.45, 0.95);
+    const confidence = clampNumber(0.9 - position.distanceMeters / 1400 - gpsAge / 600 - bearingConfidencePenalty - (destinationScore === 0 ? 0.08 : 0), 0.45, 0.95);
 
     return {
       method: 'schedule',
@@ -2513,12 +3229,28 @@ function estimateVehicleScheduleArrival(vehicle, stop) {
       waitMinutes,
       arrivalClock: minutesToClock(Math.round(currentMinutesOfDay() + waitMinutes)),
       confidence,
-      matchScore: position.distanceMeters + pathMeters / 120 - destinationScore * 700,
+      vehicle,
+      vehicleHeading: position.heading,
+      directionHeading: routeHeadingAtStop(route, transferIndex),
+      positionDistance: position.distanceMeters,
+      routeMetersToStop: pathMeters,
+      destinationScore,
+      bearingGap,
+      matchScore: position.distanceMeters + pathMeters / 120 + bearingPenalty - destinationScore * 700,
     };
   }).filter(Boolean)
-    .sort((a, b) => a.matchScore - b.matchScore || a.waitMinutes - b.waitMinutes);
+    .sort((a, b) => {
+      const waitA = Number.isFinite(a.waitMinutes) ? a.waitMinutes : Infinity;
+      const waitB = Number.isFinite(b.waitMinutes) ? b.waitMinutes : Infinity;
+      return a.matchScore - b.matchScore || waitA - waitB;
+    });
 
-  return candidates[0] || null;
+  const best = candidates[0];
+  if (!best || best.positionDistance > 900 || (best.destinationScore === 0 && best.positionDistance > 320)) {
+    return null;
+  }
+
+  return best;
 }
 
 function estimateVehicleDistanceArrival(vehicle, stop) {
@@ -2592,6 +3324,23 @@ function routeDistanceFromPositionToStop(route, position, transferIndex) {
   return meters;
 }
 
+function routeHeadingAtStop(route, stopIndex) {
+  const stops = Array.isArray(route?.stops) ? route.stops : [];
+  const index = Number(stopIndex);
+  if (!Number.isFinite(index) || !stops[index]) {
+    return NaN;
+  }
+
+  if (stops[index + 1] && isStopCoordinate(stops[index]) && isStopCoordinate(stops[index + 1])) {
+    return routeStopHeading(stops[index], stops[index + 1]);
+  }
+  if (stops[index - 1] && isStopCoordinate(stops[index - 1]) && isStopCoordinate(stops[index])) {
+    return routeStopHeading(stops[index - 1], stops[index]);
+  }
+
+  return NaN;
+}
+
 function minutesUntilScheduleTime(timeMinutes) {
   const now = currentMinutesOfDay();
   const options = [timeMinutes, timeMinutes - 1440, timeMinutes + 1440]
@@ -2617,16 +3366,37 @@ function transferDepartureWaitMinutes(departure) {
 }
 
 function vehicleTransferStepsHtml() {
+  const currentVehicle = selectedTransferVehicle();
+  const targetVehicle = selectedTransferTargetVehicle();
+  const targetLine = normalizeLine(state.transfer.targetLine || '');
+  const currentKind = currentVehicle ? transportLabel(vehicleTransportType(currentVehicle)) : transportLabel();
+  const targetKind = targetVehicle ? transportLabel(vehicleTransportType(targetVehicle)) : transportLabel();
   const steps = [
-    { label: 'Minu', active: Boolean(state.transfer.currentVehicleKey) },
-    { label: 'Siht', active: Boolean(state.transfer.targetDepartureKey || state.transfer.targetVehicleKey || state.transfer.targetLine) },
-    { label: 'Peatus', active: Boolean(state.transfer.stop) },
+    {
+      label: currentVehicle ? normalizeLine(currentVehicle.line || '') : 'Minu',
+      title: currentVehicle ? `Minu ${currentKind} ${normalizeLine(currentVehicle.line || '')}` : `Minu ${currentKind} valimata`,
+      active: Boolean(state.transfer.currentVehicleKey),
+    },
+    {
+      label: targetVehicle ? normalizeLine(targetVehicle.line || '') : targetLine || 'Siht',
+      title: targetVehicle
+        ? `Siht${targetKind} ${normalizeLine(targetVehicle.line || '')}`
+        : targetLine
+          ? `Sihtliin ${targetLine}`
+          : `Siht${targetKind} valimata`,
+      active: Boolean(state.transfer.targetDepartureKey || state.transfer.targetVehicleKey || state.transfer.targetLine),
+    },
+    {
+      label: 'Peatus',
+      title: state.transfer.stop ? 'Ümberistumise peatus valitud' : 'Ümberistumise peatus valimata',
+      active: Boolean(state.transfer.stop),
+    },
   ];
 
   return `
     <div class="vehicle-transfer-steps" aria-label="Ümberistumise sammud">
       ${steps.map((step, index) => `
-        <span class="vehicle-transfer-step ${step.active ? 'is-done' : ''}">
+        <span class="vehicle-transfer-step ${step.active ? 'is-done' : ''}" title="${escapeHtml(step.title)}" aria-label="${escapeHtml(step.title)}">
           <i>${step.active ? '✓' : index + 1}</i>
           <span>${escapeHtml(step.label)}</span>
         </span>
@@ -2699,7 +3469,7 @@ function handleTransferActionClick(event) {
   }
 }
 
-function hasTransferBusSelection() {
+function hasTransferVehicleSelection() {
   return Boolean(state.transfer.currentVehicleKey && (state.transfer.targetVehicleKey || state.transfer.targetLine));
 }
 
@@ -2712,12 +3482,24 @@ function transferSummaryText(result) {
     return 'Arvutan väljumisi';
   }
 
+  if (result.status === 'missed') {
+    return 'Peatus on juba möödas';
+  }
+
+  if (result.status === 'noStop') {
+    return `See ${transportLabel()} ei peatu siin`;
+  }
+
+  if (result.status === 'oppositeDirection') {
+    return 'Vastassuunas liikumine';
+  }
+
   if (!state.transfer.currentVehicleKey) {
-    return '1. Vali Minu buss';
+    return `1. Vali Minu ${transportLabel()}`;
   }
 
   if (!state.transfer.targetVehicleKey && !state.transfer.targetLine) {
-    return '2. Vali Sihtbuss';
+    return `2. Vali Siht${transportLabel()}`;
   }
 
   if (!state.transfer.stop) {
@@ -2728,6 +3510,10 @@ function transferSummaryText(result) {
 }
 
 function transferGuideState(result, vehicle) {
+  const currentKind = transportLabel(vehicle ? vehicleTransportType(vehicle) : activeTransportType());
+  const currentTitle = transportTitleLabel(vehicle ? vehicleTransportType(vehicle) : activeTransportType());
+  const targetKind = transportLabel();
+
   if (result.status === 'loading') {
     return {
       icon: 'loader-circle',
@@ -2746,11 +3532,40 @@ function transferGuideState(result, vehicle) {
     };
   }
 
+  if (result.status === 'missed') {
+    return {
+      icon: 'octagon-alert',
+      title: 'Peatus on juba möödas',
+      body: result.message || 'Vali järgmine ümberistumise peatus.',
+      tone: 'warning',
+    };
+  }
+
+  if (result.status === 'noStop') {
+    return {
+      icon: 'ban',
+      title: `${currentTitle} ei peatu siin`,
+      body: result.message || `Vali peatus, kus mõlemad ${transportPluralNominativeLabel()} päriselt peatuvad.`,
+      tone: 'warning',
+    };
+  }
+
+  if (result.status === 'oppositeDirection') {
+    return {
+      icon: 'arrow-left-right',
+      title: `${transportTitleLabel()}id liiguvad vastassuunas`,
+      body: result.message || `Vali ümberistumiseks peatus, kus siht${targetKind} liigub sinu soovitud suunas.`,
+      tone: 'warning',
+    };
+  }
+
   if (!state.transfer.currentVehicleKey) {
     return {
       icon: 'user-round',
-      title: '1. Märgi oma buss',
-      body: vehicle ? 'Kui oled selle bussi peal, vajuta „Minu buss“.' : 'Ava buss, mille peal oled, ja vajuta „Minu buss“.',
+      title: `1. Märgi oma ${currentKind}`,
+      body: vehicle
+        ? `Kui oled selle ${currentKind}i peal, vajuta „Minu ${currentKind}“.`
+        : `Ava ${currentKind}, mille peal oled, ja vajuta „Minu ${currentKind}“.`,
       tone: 'next',
     };
   }
@@ -2758,8 +3573,8 @@ function transferGuideState(result, vehicle) {
   if (!state.transfer.targetVehicleKey && !state.transfer.targetLine) {
     return {
       icon: 'flag',
-      title: '2. Märgi sihtbuss',
-      body: 'Ava buss, mille peale tahad jõuda, ja vajuta „Sihtbuss“.',
+      title: `2. Märgi siht${targetKind}`,
+      body: `Ava ${targetKind}, mille peale tahad jõuda, ja vajuta „Siht${targetKind}“.`,
       tone: 'next',
     };
   }
@@ -2776,7 +3591,7 @@ function transferGuideState(result, vehicle) {
   return {
     icon: 'route',
     title: 'Kontrollin ümberistumist',
-    body: result.message || 'Võrdlen busside saabumise ja väljumise aegu.',
+    body: result.message || `Võrdlen ${transportPluralGenitiveLabel()} saabumise ja väljumise aegu.`,
     tone: 'next',
   };
 }
@@ -2794,19 +3609,53 @@ function transferGuideHtml(result, vehicle) {
   `;
 }
 
+function vehicleTransferMiniFactsHtml(result) {
+  return `
+    <div class="vehicle-transfer-facts">
+      <span>Saabun ${escapeHtml(result.arrival.arrivalClock)}</span>
+      <span>Väljub ${escapeHtml(result.targetClock)}</span>
+      <span>${escapeHtml(transferMarginLabel(result.margin))}</span>
+      <span>${escapeHtml(transferConfidenceLabel(result.confidence))}</span>
+    </div>
+  `;
+}
+
+function vehicleTransferSelectionHtml() {
+  return `
+    <div class="vehicle-transfer-selection" aria-label="Valitud ${transportPluralNominativeLabel()}">
+      ${vehicleTransferSelectionItemHtml(`Minu ${transportLabel()}`, selectedTransferVehicle(), 'user-round')}
+      ${vehicleTransferSelectionItemHtml(`Siht${transportLabel()}`, selectedTransferTargetVehicle(), 'flag')}
+    </div>
+  `;
+}
+
+function vehicleTransferSelectionItemHtml(label, vehicle, icon) {
+  const value = vehicle ? transferVehicleLabel(vehicle) : 'Valimata';
+  return `
+    <span class="${vehicle ? 'is-selected' : ''}">
+      <i data-lucide="${escapeHtml(icon)}"></i>
+      <b>${escapeHtml(label)}</b>
+      <small>${escapeHtml(value)}</small>
+    </span>
+  `;
+}
+
 function vehicleTransferPanelHtml(vehicle) {
   const key = vehicleKey(vehicle);
+  const vehicleName = transportLabel(vehicleTransportType(vehicle));
   const isCurrent = state.transfer.currentVehicleKey === key;
   const isTarget = state.transfer.targetVehicleKey === key;
+  const currentDisabled = isTarget ? `disabled title="See ${vehicleName} on juba siht${vehicleName}"` : '';
+  const targetDisabled = isCurrent ? `disabled title="See ${vehicleName} on juba minu ${vehicleName}"` : '';
   const stop = state.transfer.stop;
   const result = calculateTransferChance();
   const expanded = Boolean(state.transfer.popupExpanded);
   const canCalculate = Boolean(state.transfer.currentVehicleKey && (state.transfer.targetVehicleKey || state.transfer.targetLine) && stop);
-  const refreshTitle = hasTransferBusSelection()
+  const refreshTitle = hasTransferVehicleSelection()
     ? stop
       ? 'Arvuta ümberistumine'
       : 'Vali ümberistumise peatus peatuse aknast'
-    : 'Vali enne bussid välja';
+    : `Vali enne ${transportPluralNominativeLabel()} välja`;
   const hasTransferSelection = Boolean(
     state.transfer.currentVehicleKey
     || state.transfer.targetVehicleKey
@@ -2819,7 +3668,15 @@ function vehicleTransferPanelHtml(vehicle) {
     stop?.id,
     state.transfer.targetDepartureKey || state.transfer.targetVehicleKey || state.transfer.targetLine,
   ].filter(Boolean).length;
-  const statusBadge = result.status === 'ready' ? `${result.probability}%` : `${selectedCount}/3`;
+  const statusBadge = result.status === 'ready'
+    ? `${result.probability}%`
+    : result.status === 'missed'
+      ? 'Möödas'
+      : result.status === 'noStop'
+        ? 'Ei peatu'
+        : result.status === 'oppositeDirection'
+          ? 'Vastassuund'
+          : `${selectedCount}/3`;
   const statusText = transferSummaryText(result);
   const resultHtml = result.status === 'ready'
     ? `
@@ -2827,7 +3684,7 @@ function vehicleTransferPanelHtml(vehicle) {
         <strong>${result.probability}%</strong>
         <span>
           <b>${escapeHtml(transferOutcomeTitle(result))}</b>
-          <small>${escapeHtml(transferMarginLabel(result.margin))} · ${escapeHtml(result.targetClock)}</small>
+          <small>${escapeHtml(transferAdviceText(result))}</small>
         </span>
         <i class="vehicle-transfer-mini-bar" style="--chance: ${clampNumber(result.probability, 0, 100)}%"></i>
       </div>
@@ -2847,13 +3704,13 @@ function vehicleTransferPanelHtml(vehicle) {
       <div class="vehicle-transfer-body" ${expanded ? '' : 'hidden'}>
         ${vehicleTransferStepsHtml()}
         <div class="vehicle-transfer-actions">
-          <button class="vehicle-transfer-button ${isCurrent ? 'is-active' : ''}" type="button" data-transfer-current-vehicle="${escapeHtml(key)}" aria-pressed="${isCurrent ? 'true' : 'false'}">
+          <button class="vehicle-transfer-button ${isCurrent ? 'is-active' : ''}" type="button" data-transfer-current-vehicle="${escapeHtml(key)}" aria-pressed="${isCurrent ? 'true' : 'false'}" ${currentDisabled}>
             <i data-lucide="${isCurrent ? 'check' : 'user-round'}"></i>
-            <span>Minu buss</span>
+            <span>Minu ${escapeHtml(vehicleName)}</span>
           </button>
-          <button class="vehicle-transfer-button secondary ${isTarget ? 'is-active' : ''}" type="button" data-transfer-target-vehicle="${escapeHtml(key)}" aria-pressed="${isTarget ? 'true' : 'false'}">
+          <button class="vehicle-transfer-button secondary ${isTarget ? 'is-active' : ''}" type="button" data-transfer-target-vehicle="${escapeHtml(key)}" aria-pressed="${isTarget ? 'true' : 'false'}" ${targetDisabled}>
             <i data-lucide="${isTarget ? 'check' : 'flag'}"></i>
-            <span>Sihtbuss</span>
+            <span>Siht${escapeHtml(vehicleName)}</span>
           </button>
         </div>
         <div class="vehicle-transfer-stop">
@@ -2868,6 +3725,7 @@ function vehicleTransferPanelHtml(vehicle) {
           </div>
         </div>
         ${resultHtml}
+        ${result.status === 'ready' ? vehicleTransferMiniFactsHtml(result) : ''}
       </div>
     </section>
   `;
@@ -2885,6 +3743,7 @@ async function fetchRoutes() {
 
   const params = new URLSearchParams({
     action: 'routes',
+    type: activeTransportType(),
     lines: state.selectedLines.join(','),
   });
 
@@ -2939,18 +3798,21 @@ function renderOverviewRoutes(styledRoutes) {
       segments = offsetRouteSegments(segments, style.mapSide);
     }
 
-    const color = routeColor(route.line);
+    const color = routeColor(route.line, routeTransportType(route));
     const emphasis = lineMapOpacity(route.line);
     const dark = state.theme === 'dark';
+    const tram = routeTransportType(route) === 'tram';
+    const mainDash = tram ? '9 5' : style.dashArray;
+    const mainWeight = style.weight + (tram ? 2 : 0) + (dark ? 1 : 0);
 
     L.polyline(segments, {
       pane: 'routePane',
-      color: routeGapColor(),
-      weight: style.weight + (dark ? 5 : 3),
-      opacity: dark ? (style.dashArray ? 0.72 : 0.58) : (style.dashArray ? 0.58 : 0.44),
+      color: tram ? tramRouteRailColor() : routeGapColor(),
+      weight: style.weight + (tram ? 7 : (dark ? 5 : 3)),
+      opacity: tram ? (dark ? 0.62 : 0.52) : (dark ? (style.dashArray ? 0.72 : 0.58) : (style.dashArray ? 0.58 : 0.44)),
       lineCap: 'round',
       lineJoin: 'round',
-      dashArray: style.dashArray,
+      dashArray: tram ? null : style.dashArray,
       dashOffset: style.dashOffset,
       smoothFactor: 1.5,
       interactive: false,
@@ -2959,16 +3821,30 @@ function renderOverviewRoutes(styledRoutes) {
     const line = L.polyline(segments, {
       pane: 'routePane',
       color,
-      weight: style.weight + (dark ? 1 : 0),
+      weight: mainWeight,
       opacity: Math.min(1, (dark ? 1 : 0.9) * emphasis),
-      lineCap: 'round',
+      lineCap: tram ? 'butt' : 'round',
       lineJoin: 'round',
-      dashArray: style.dashArray,
+      dashArray: mainDash,
       dashOffset: style.dashOffset,
       smoothFactor: 1.5,
     }).addTo(state.routeLayer);
 
-    line.bindTooltip(`Liin ${escapeHtml(route.line)} · ${escapeHtml(style.label)}`, {
+    if (tram) {
+      L.polyline(segments, {
+        pane: 'routePane',
+        color: state.theme === 'dark' ? '#f8fafc' : '#ffffff',
+        weight: 2,
+        opacity: Math.min(0.82, 0.58 * emphasis),
+        lineCap: 'butt',
+        lineJoin: 'round',
+        dashArray: '1 12',
+        smoothFactor: 1.5,
+        interactive: false,
+      }).addTo(state.routeLayer);
+    }
+
+    line.bindTooltip(`${tram ? 'Tramm' : 'Liin'} ${escapeHtml(route.line)} · ${escapeHtml(style.label)}`, {
       sticky: true,
       opacity: 0.95,
     });
@@ -3044,7 +3920,7 @@ function routeDrawingSegments(styledRoutes) {
           style,
           line: String(route.line),
           points: [start, end],
-          color: routeColor(route.line),
+          color: routeColor(route.line, routeTransportType(route)),
           opacity: 0.98 * lineMapOpacity(route.line),
           direction: routeDirectionIndex(route) % 2,
           heading: routeSegmentHeadingDegrees(start, end),
@@ -3410,6 +4286,10 @@ function routeGapColor() {
   return state.theme === 'dark' ? '#f3f7fb' : '#ffffff';
 }
 
+function tramRouteRailColor() {
+  return state.theme === 'dark' ? '#0b1117' : '#4b5563';
+}
+
 function routeDirectionStyle(route) {
   return routeDirectionIndex(route) % 2 === 1
     ? ROUTE_SIDE_STYLES.north
@@ -3449,6 +4329,8 @@ function renderRouteStops() {
 
 function vehicleIcon(vehicle, risk) {
   const riskClass = risk.level === 'high' ? 'risk-high' : risk.level === 'medium' ? 'risk-medium' : '';
+  const transportType = vehicleTransportType(vehicle);
+  const transportClass = transportType === 'tram' ? 'is-tram' : 'is-bus';
   const riskBadge = risk.level === 'high' || risk.level === 'medium'
     ? '<span class="vehicle-risk-badge" aria-hidden="true">!</span>'
     : '';
@@ -3458,15 +4340,16 @@ function vehicleIcon(vehicle, risk) {
     ? `<span class="vehicle-type-badge ${typeClass}" title="${escapeHtml(profile.shortLabel)}">${escapeHtml(profile.badge)}</span>`
     : '';
   const destination = shortText(vehicle.destination || '', 12);
-  const color = routeColor(vehicle.line);
+  const color = routeColor(vehicle.line, transportType);
   const bearing = Number.isFinite(Number(vehicle.bearing)) ? Number(vehicle.bearing) : 0;
   return L.divIcon({
-    className: `vehicle-marker ${riskClass} ${typeClass}`,
+    className: `vehicle-marker ${transportClass} ${riskClass} ${typeClass}`,
     html: `
       <div class="vehicle-icon-wrap">
         <div class="vehicle-pin" style="--vehicle-color: ${color}; --bearing: ${bearing}deg;">
           <span class="vehicle-pulse" aria-hidden="true"></span>
           <span class="vehicle-arrow" aria-hidden="true"><i></i></span>
+          <span class="vehicle-mode-symbol" aria-hidden="true"><i data-lucide="${transportIconName(transportType)}"></i></span>
           <strong>${escapeHtml(vehicle.line)}</strong>
           ${riskBadge}
         </div>
@@ -3486,7 +4369,7 @@ function renderVehicleList() {
   }
 
   if (state.vehicles.length === 0) {
-    els.vehicleList.innerHTML = '<div class="empty-state">Selle liini bussi ei leitud</div>';
+    els.vehicleList.innerHTML = `<div class="empty-state">Selle liini ${transportLabel()}i ei leitud</div>`;
     return;
   }
 
@@ -3503,7 +4386,7 @@ function renderVehicleList() {
     const profile = vehicleProfile(vehicle);
     return `
       <button class="vehicle-row ${riskClass}" type="button" data-vehicle-key="${escapeHtml(vehicleKey(vehicle))}">
-        <span class="route-badge compact" style="--badge-color: ${routeColor(vehicle.line)}">${escapeHtml(vehicle.line)}</span>
+        <span class="route-badge compact ${vehicleTransportType(vehicle) === 'tram' ? 'tram' : ''}" style="--badge-color: ${routeColor(vehicle.line, vehicleTransportType(vehicle))}">${escapeHtml(vehicle.line)}</span>
         <span class="vehicle-row-text">
           <strong>${escapeHtml(vehicle.destination || 'Siht teadmata')}</strong>
           <span class="vehicle-type-chip ${profile.isElectric ? 'electric' : ''} ${profile.isArticulated ? 'articulated' : ''} ${profile.isKnown ? '' : 'unknown'}">
@@ -3544,11 +4427,12 @@ function vehiclePopup(vehicle, risk) {
   const riskDetail = risk.detail ? `<small>${escapeHtml(risk.detail)}</small>` : '';
   const profile = vehicleProfile(vehicle);
   const fleetInfo = vehicleFleetInfoHtml(profile);
+  const headingLabel = vehicleTransportType(vehicle) === 'tram' ? 'Tramm' : 'Liin';
   return `
     <div class="popup-card vehicle-popup-card risk-${riskClass}">
       <div class="vehicle-popup-head">
         <span>
-          <strong>Liin ${escapeHtml(vehicle.line)}</strong>
+          <strong>${headingLabel} ${escapeHtml(vehicle.line)}</strong>
           <span>${escapeHtml(vehicle.destination || 'Siht teadmata')}</span>
         </span>
         <em class="popup-risk-badge ${riskClass}">${risk.level === 'low' ? 'OK' : '!'}</em>
@@ -3590,29 +4474,29 @@ async function loadStopPopupDepartures(stop, marker) {
 }
 
 function stopPopupContent(stop, departures, loading = false, error = '') {
-  const busDepartures = (departures || [])
-    .filter((departure) => departure.type === 'bus')
+  const visibleDepartures = (departures || [])
+    .filter((departure) => departureTransportType(departure) === activeTransportType())
     .slice(0, 6);
-  const canSelectTransferStop = hasTransferBusSelection();
-  const transferButtonText = canSelectTransferStop ? 'Ümberistun siin' : 'Vali enne bussid';
+  const canSelectTransferStop = hasTransferVehicleSelection();
+  const transferButtonText = canSelectTransferStop ? 'Ümberistun siin' : `Vali enne ${transportPluralNominativeLabel()}`;
   const transferButtonTitle = canSelectTransferStop
     ? 'Kasuta seda peatust ümberistumiseks'
-    : 'Vali enne praegune buss ja sihtbuss';
+    : `Vali enne praegune ${transportLabel()} ja siht${transportLabel()}`;
 
   let departuresHtml = '<div class="popup-loading">Laen väljumisi...</div>';
 
   if (!loading && error) {
     departuresHtml = `<div class="popup-loading error">${escapeHtml(error)}</div>`;
-  } else if (!loading && busDepartures.length === 0) {
-    departuresHtml = '<div class="popup-loading">Lähiajal busse ei leitud</div>';
+  } else if (!loading && visibleDepartures.length === 0) {
+    departuresHtml = `<div class="popup-loading">Lähiajal ${transportPluralLabel()} ei leitud</div>`;
   } else if (!loading) {
-    departuresHtml = busDepartures.map((departure) => {
+    departuresHtml = visibleDepartures.map((departure) => {
       const minutes = departure.minutesUntil === null || departure.minutesUntil === undefined
         ? departure.expectedTime
         : `${departure.minutesUntil} min`;
       return `
         <div class="popup-departure">
-          <span class="route-badge mini" style="--badge-color: ${routeColor(departure.line)}">${escapeHtml(departure.line)}</span>
+          <span class="route-badge mini ${departureTransportType(departure) === 'tram' ? 'tram' : ''}" style="--badge-color: ${routeColor(departure.line, departureTransportType(departure))}">${escapeHtml(departure.line)}</span>
           <span>
             <strong>${escapeHtml(departure.destination || '')}</strong>
             <small>${escapeHtml(minutes)} · ${escapeHtml(departure.expectedTime)}</small>
@@ -3775,18 +4659,19 @@ async function fetchDepartures(stop) {
 }
 
 function renderDepartures() {
-  if (state.departures.length === 0) {
+  const departures = state.departures.filter((departure) => departureTransportType(departure) === activeTransportType());
+  if (departures.length === 0) {
     els.departures.innerHTML = '<div class="empty-state">Väljumisi ei ole</div>';
     return;
   }
 
-  els.departures.innerHTML = state.departures.slice(0, 8).map((departure) => {
+  els.departures.innerHTML = departures.slice(0, 8).map((departure) => {
     const delayMinutes = Math.round((departure.delaySeconds || 0) / 60);
     const delayClass = delayMinutes >= 2 ? 'late' : delayMinutes <= -1 ? 'early' : '';
     const delayText = delayMinutes >= 2 ? `+${delayMinutes} min` : delayMinutes <= -1 ? `${delayMinutes} min` : 'õigeaegne';
     return `
       <article class="departure ${delayClass}">
-        <span class="route-badge" style="--badge-color: ${routeColor(departure.line)}">${escapeHtml(departure.line)}</span>
+        <span class="route-badge ${departureTransportType(departure) === 'tram' ? 'tram' : ''}" style="--badge-color: ${routeColor(departure.line, departureTransportType(departure))}">${escapeHtml(departure.line)}</span>
         <div>
           <strong>${escapeHtml(departure.destination || '')}</strong>
           <span>${departure.scheduledTime} plaanis</span>
@@ -3802,7 +4687,7 @@ function renderDepartures() {
 
 async function fetchScheduleLines() {
   try {
-    const data = await fetchJson('api.html?action=lines&type=bus');
+    const data = await fetchJson(`api.html?action=lines&type=${encodeURIComponent(activeTransportType())}`);
     state.scheduleAvailableLines = Array.isArray(data.lines)
       ? data.lines.map(normalizeLine).filter(Boolean)
       : [];
@@ -3825,7 +4710,7 @@ function renderScheduleLineOptions() {
     return;
   }
 
-  const currentLine = normalizeLine(state.scheduleLine || state.selectedLines[0] || DEFAULT_LINES[0] || '');
+  const currentLine = normalizeLine(state.scheduleLine || state.selectedLines[0] || defaultLinesForTransport()[0] || '');
   const lines = uniqueSortedLines([
     ...state.selectedLines,
     ...state.scheduleAvailableLines,
@@ -3862,7 +4747,7 @@ function selectScheduleLine(value) {
 }
 
 async function fetchSchedule() {
-  const line = normalizeLine(state.scheduleLine || state.selectedLines[0] || DEFAULT_LINES[0] || '');
+  const line = normalizeLine(state.scheduleLine || state.selectedLines[0] || defaultLinesForTransport()[0] || '');
   if (!line) {
     renderScheduleEmpty('Vali liin');
     return;
@@ -3886,7 +4771,7 @@ async function fetchSchedule() {
     els.scheduleList.innerHTML = '<div class="empty-state">Laen sõiduplaani...</div>';
   }
 
-  const params = new URLSearchParams({ action: 'schedule', line });
+  const params = new URLSearchParams({ action: 'schedule', type: activeTransportType(), line });
 
   try {
     const data = await fetchJson(`api.html?${params.toString()}`);
@@ -3996,9 +4881,10 @@ function renderScheduleDirections() {
 
   els.scheduleDirections.innerHTML = state.scheduleRoutes.map((route, index) => {
     const active = index === state.scheduleRouteIndex;
+    const routeType = routeTransportType(route);
     return `
       <button class="schedule-direction${active ? ' is-active' : ''}" type="button" data-schedule-route="${index}">
-        <span class="route-badge mini" data-line="${escapeHtml(route.line)}" style="--badge-color: ${routeColor(route.line)}">${escapeHtml(route.line)}</span>
+        <span class="route-badge mini${routeBadgeModeClass(routeType)}" data-line="${escapeHtml(route.line)}" style="--badge-color: ${routeColor(route.line, routeType)}">${escapeHtml(route.line)}</span>
         <span>
           <strong>${escapeHtml(scheduleDirectionTitle(route, index))}</strong>
           <small>${escapeHtml(scheduleDirectionMeta(route, index))}</small>
@@ -4028,13 +4914,14 @@ function renderScheduleRouteLegacy(loadTimes = true, requestId = state.scheduleR
   }
 
   const stops = Array.isArray(route.stops) ? route.stops : [];
+  const routeType = routeTransportType(route);
   if (els.scheduleSummary) {
     els.scheduleSummary.textContent = `${stops.length} peatust`;
   }
 
   els.scheduleList.innerHTML = `
     <div class="schedule-route-head">
-      <span class="route-badge" data-line="${escapeHtml(route.line)}" style="--badge-color: ${routeColor(route.line)}">${escapeHtml(route.line)}</span>
+      <span class="route-badge${routeBadgeModeClass(routeType)}" data-line="${escapeHtml(route.line)}" style="--badge-color: ${routeColor(route.line, routeType)}">${escapeHtml(route.line)}</span>
       <span>
         <strong>${escapeHtml(scheduleDirectionTitle(route, state.scheduleRouteIndex))}</strong>
         <small>${escapeHtml(scheduleDirectionMeta(route, state.scheduleRouteIndex))}</small>
@@ -4097,7 +4984,7 @@ async function loadScheduleDepartures(route, requestId) {
       }
 
       const departures = (data.departures || [])
-        .filter((departure) => departure.type === 'bus')
+        .filter((departure) => departureTransportType(departure) === activeTransportType())
         .filter((departure) => normalizeLine(String(departure.line || '')) === line)
         .slice(0, 3);
       target.innerHTML = scheduleDepartureTimesHtml(departures);
@@ -4239,6 +5126,7 @@ function renderScheduleRoute() {
   }
 
   const stops = Array.isArray(route.stops) ? route.stops : [];
+  const routeType = routeTransportType(route);
   state.scheduleStopIndex = clampNumber(state.scheduleStopIndex, 0, Math.max(0, stops.length - 1));
   const selectedStop = stops[state.scheduleStopIndex] || stops[0] || {};
   const schedule = buildStopSchedule(route, state.scheduleStopIndex);
@@ -4294,7 +5182,7 @@ function renderScheduleRoute() {
 
       <div class="schedule-detail">
         <div class="schedule-route-head">
-          <span class="route-badge" data-line="${escapeHtml(route.line)}" style="--badge-color: ${routeColor(route.line)}">${escapeHtml(route.line)}</span>
+          <span class="route-badge${routeBadgeModeClass(routeType)}" data-line="${escapeHtml(route.line)}" style="--badge-color: ${routeColor(route.line, routeType)}">${escapeHtml(route.line)}</span>
           <span>
             <small>${escapeHtml(scheduleDirectionTitle(route, state.scheduleRouteIndex))}</small>
             <strong>${escapeHtml(selectedStop.name || 'Peatus')}</strong>
@@ -4306,7 +5194,7 @@ function renderScheduleRoute() {
           <span><i data-lucide="clock-3"></i> Järgmised väljumised</span>
           <div>
             ${nextDepartures.length ? nextDepartures.map((departure) => `
-              <strong><span class="route-badge mini" data-line="${escapeHtml(route.line)}" style="--badge-color: ${routeColor(route.line)}">${escapeHtml(route.line)}</span>${escapeHtml(departure.waitLabel)}</strong>
+              <strong><span class="route-badge mini${routeBadgeModeClass(routeType)}" data-line="${escapeHtml(route.line)}" style="--badge-color: ${routeColor(route.line, routeType)}">${escapeHtml(route.line)}</span>${escapeHtml(departure.waitLabel)}</strong>
             `).join('') : '<small>Lähiajal väljumisi ei leitud</small>'}
           </div>
         </div>
@@ -4414,11 +5302,12 @@ function renderScheduleTripTimeline(route, departure, selectedStop) {
     ? route.scheduleSources
     : [route];
   const source = sources[departure.sourceIndex] || route;
+  const routeType = routeTransportType(route);
 
   return `
     <section class="schedule-trip-detail" aria-label="Valitud väljumise peatused">
       <div class="schedule-trip-head">
-        <span class="route-badge mini" data-line="${escapeHtml(route.line)}" style="--badge-color: ${routeColor(route.line)}">${escapeHtml(route.line)}</span>
+        <span class="route-badge mini${routeBadgeModeClass(routeType)}" data-line="${escapeHtml(route.line)}" style="--badge-color: ${routeColor(route.line, routeType)}">${escapeHtml(route.line)}</span>
         <span>
           <strong>Väljumine ${escapeHtml(minutesToClock(departure.time))}</strong>
           <small>${escapeHtml(source.name || scheduleDirectionTitle(route, state.scheduleRouteIndex))}</small>
@@ -4896,6 +5785,7 @@ function renderWeather(data) {
   const wind = Math.round(current.wind_speed_10m || 0);
   const precipitation = Number(current.precipitation || 0);
   const code = Number(current.weather_code || 0);
+  state.weather = { temp, wind, precipitation, code };
   const weatherText = weatherCodeText(code);
   const advice = walkingText(temp, wind, precipitation, code);
 
@@ -4906,8 +5796,8 @@ function renderWeather(data) {
 }
 
 function walkingText(temp, wind, precipitation, code) {
-  if (precipitation > 0.4 || [61, 63, 65, 71, 73, 75, 80, 81, 82, 95].includes(code)) {
-    return 'Buss on mugavam valik';
+  if (precipitation > 0.4 || TRANSFER_WEATHER_CODES_SLOW.includes(code)) {
+    return `${transportTitleLabel()} on mugavam valik`;
   }
   if (wind > 30 || temp < -8) {
     return 'Jalgsi pigem lühike ots';
@@ -4941,7 +5831,9 @@ function weatherCodeText(code) {
 }
 
 function renderDelayPanel() {
-  const lateDepartures = state.departures.filter((departure) => departure.delaySeconds >= 120);
+  const lateDepartures = state.departures
+    .filter((departure) => departureTransportType(departure) === activeTransportType())
+    .filter((departure) => departure.delaySeconds >= 120);
   const riskyVehicles = state.vehicles
     .map((vehicle) => ({ vehicle, risk: vehicleDelayRisk(vehicle) }))
     .filter((item) => item.risk.level !== 'low');
@@ -5013,7 +5905,7 @@ function vehicleDelayRisk(vehicle) {
 
 function vehicleScheduleDelay(vehicle) {
   const line = normalizeLine(vehicle.line || '');
-  const routes = state.delayScheduleRoutes.get(line) || [];
+  const routes = state.delayScheduleRoutes.get(transportLineKey(line, vehicleTransportType(vehicle))) || [];
   const gpsAge = Number(vehicle.ageSeconds || 0);
   if (routes.length === 0 || gpsAge > 180) {
     return null;
@@ -5200,12 +6092,37 @@ function routeStopHeading(start, end) {
   return (Math.atan2(dx, dy) * 180 / Math.PI + 360) % 360;
 }
 
+function vehicleBearingDifference(vehicle, heading) {
+  const bearing = transferVehicleBearing(vehicle);
+  return Number.isFinite(bearing) && Number.isFinite(heading) ? bearingDifference(bearing, heading) : NaN;
+}
+
 function bearingDifference(a, b) {
   const diff = Math.abs(Number(a) - Number(b)) % 360;
   return Math.min(diff, 360 - diff);
 }
 
 function vehicleProfile(vehicle) {
+  if (vehicleTransportType(vehicle) === 'tram') {
+    return {
+      isKnown: true,
+      isTram: true,
+      isElectric: true,
+      isArticulated: false,
+      badge: 'T',
+      shortLabel: 'Tramm',
+      sizeLabel: 'Tramm',
+      powerLabel: 'Elektriga',
+      model: '',
+      power: 'electric',
+      size: 'tram',
+      facts: [
+        { icon: 'tram', label: 'Tramm' },
+        { icon: 'zap', label: 'Elektriga' },
+      ],
+    };
+  }
+
   const fleet = findVehicleFleetRecord(vehicle);
 
   if (!fleet) {
@@ -5323,6 +6240,10 @@ function vehicleTypeBadge(fleet, isElectric, isArticulated) {
 }
 
 function vehicleTypeClass(profile) {
+  if (profile.isTram) {
+    return 'type-tram';
+  }
+
   if (profile.isElectric) {
     return 'type-electric';
   }
@@ -5485,6 +6406,7 @@ function vehicleFleetInfoHtml(profile) {
 function vehicleFactIconHtml(icon) {
   const icons = {
     info: '<svg class="vehicle-fact-svg" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 10v6"></path><path d="M12 7h.01"></path></svg>',
+    tram: '<svg class="vehicle-fact-svg" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="12" rx="3"></rect><path d="M8 15l-2 4"></path><path d="M16 15l2 4"></path><path d="M8 8h8"></path><path d="M9 12h.01"></path><path d="M15 12h.01"></path></svg>',
     ruler: '<svg class="vehicle-fact-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 15 15 4l5 5L9 20z"></path><path d="M8 15l-2-2"></path><path d="M11 12l-2-2"></path><path d="M14 9l-2-2"></path></svg>',
     zap: '<svg class="vehicle-fact-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 10-14h-7z"></path></svg>',
     leaf: '<svg class="vehicle-fact-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20c8 0 14-6 14-14V4h-2C9 4 3 10 3 18c0 1 1 2 2 2z"></path><path d="M3 20c4-6 8-9 14-12"></path></svg>',
@@ -5496,7 +6418,7 @@ function vehicleFactIconHtml(icon) {
 
 function renderLineTags() {
   if (state.selectedLines.length === 0) {
-    els.selectedLines.innerHTML = '<span class="empty-tag">Ühtegi liini pole valitud</span>';
+    els.selectedLines.innerHTML = `<span class="empty-tag">Ühtegi ${transportLineLabel().toLocaleLowerCase('et')}i pole valitud</span>`;
     return;
   }
 
@@ -5511,7 +6433,7 @@ function renderLineTags() {
     return `
       <div class="line-control-row" data-line="${escapeHtml(line)}" style="--line-color: ${color}; --line-emphasis: ${emphasis}%">
         <label class="line-color-picker" title="Muuda liini ${escapeHtml(line)} värvi">
-          <span class="route-badge compact" style="--badge-color: ${color}">${escapeHtml(line)}</span>
+          <span class="route-badge compact ${activeTransportType() === 'tram' ? 'tram' : ''}" style="--badge-color: ${color}">${escapeHtml(line)}</span>
           <input class="line-color-input" type="color" value="${escapeHtml(color)}" data-line="${escapeHtml(line)}" aria-label="Vali liini ${escapeHtml(line)} värv">
         </label>
         <label class="line-opacity-control">
@@ -5821,21 +6743,43 @@ function renderInlineError(container, message) {
   container.innerHTML = `<div class="empty-state error">${escapeHtml(message)}</div>`;
 }
 
-function loadLines() {
+function defaultLinesForTransport(type = activeTransportType()) {
+  return [...(DEFAULT_LINES_BY_TYPE[sanitizeTransportType(type)] || DEFAULT_LINES)];
+}
+
+function linesStorageKey(type = activeTransportType()) {
+  return `bussradar.lines.${sanitizeTransportType(type)}`;
+}
+
+function loadTransportType() {
   try {
-    const stored = JSON.parse(localStorage.getItem('bussradar.lines') || 'null');
+    return sanitizeTransportType(localStorage.getItem(TRANSPORT_TYPE_KEY) || 'bus');
+  } catch {
+    return 'bus';
+  }
+}
+
+function loadLines(type = activeTransportType()) {
+  const normalizedType = sanitizeTransportType(type);
+  try {
+    const storageKey = linesStorageKey(normalizedType);
+    const raw = localStorage.getItem(storageKey) || (normalizedType === 'bus' ? localStorage.getItem('bussradar.lines') : 'null');
+    const stored = JSON.parse(raw || 'null');
     if (Array.isArray(stored) && stored.length > 0) {
       return stored.map(normalizeLine).filter(Boolean);
     }
   } catch {
-    return DEFAULT_LINES;
+    return defaultLinesForTransport(normalizedType);
   }
 
-  return DEFAULT_LINES;
+  return defaultLinesForTransport(normalizedType);
 }
 
 function saveLines() {
-  localStorage.setItem('bussradar.lines', JSON.stringify(state.selectedLines));
+  localStorage.setItem(linesStorageKey(activeTransportType()), JSON.stringify(state.selectedLines));
+  if (activeTransportType() === 'bus') {
+    localStorage.setItem('bussradar.lines', JSON.stringify(state.selectedLines));
+  }
   queuePreferenceSave();
 }
 
@@ -5879,22 +6823,32 @@ function saveLineEmphasis() {
   queuePreferenceSave();
 }
 
-function loadScheduleLine() {
+function scheduleLineStorageKey(type = activeTransportType()) {
+  return `bussradar.scheduleLine.${sanitizeTransportType(type)}`;
+}
+
+function loadScheduleLine(type = activeTransportType()) {
+  const normalizedType = sanitizeTransportType(type);
   try {
-    const stored = normalizeLine(localStorage.getItem('bussradar.scheduleLine') || '');
+    const raw = localStorage.getItem(scheduleLineStorageKey(normalizedType))
+      || (normalizedType === 'bus' ? localStorage.getItem('bussradar.scheduleLine') : '');
+    const stored = normalizeLine(raw || '');
     if (stored) {
       return stored;
     }
   } catch {
-    return DEFAULT_LINES[0];
+    return defaultLinesForTransport(normalizedType)[0];
   }
 
-  return DEFAULT_LINES[0];
+  return defaultLinesForTransport(normalizedType)[0];
 }
 
 function saveScheduleLine() {
   if (state.scheduleLine) {
-    localStorage.setItem('bussradar.scheduleLine', state.scheduleLine);
+    localStorage.setItem(scheduleLineStorageKey(activeTransportType()), state.scheduleLine);
+    if (activeTransportType() === 'bus') {
+      localStorage.setItem('bussradar.scheduleLine', state.scheduleLine);
+    }
   }
 }
 
@@ -6008,10 +6962,23 @@ function loadTheme() {
   }
 }
 
-function routeColor(line) {
+function routeColor(line, type = activeTransportType()) {
   const text = String(line);
   if (state.lineColors && isHexColor(state.lineColors[text])) {
     return state.lineColors[text];
+  }
+
+  if (sanitizeTransportType(type) === 'tram') {
+    const tramPreferred = {
+      1: '#ea580c',
+      2: '#c2410c',
+      3: '#f97316',
+      4: '#dc2626',
+      5: '#be123c',
+    };
+    if (Object.prototype.hasOwnProperty.call(tramPreferred, text)) {
+      return tramPreferred[text];
+    }
   }
 
   const preferred = {
@@ -6061,7 +7028,7 @@ function normalizeLine(value) {
 }
 
 function vehicleKey(vehicle) {
-  return `${vehicle.line}-${vehicle.id}-${vehicle.destination || ''}`;
+  return `${vehicleTransportType(vehicle)}-${vehicle.line}-${vehicle.id}-${vehicle.destination || ''}`;
 }
 
 function shortText(value, maxLength) {
@@ -6103,16 +7070,16 @@ function registerServiceWorker() {
   if ('serviceWorker' in navigator) {
     let reloadedForWorker = false;
     navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (reloadedForWorker || sessionStorage.getItem('bussradar.swReloaded') === '166') {
+      if (reloadedForWorker || sessionStorage.getItem('bussradar.swReloaded') === '176') {
         return;
       }
 
       reloadedForWorker = true;
-      sessionStorage.setItem('bussradar.swReloaded', '166');
+      sessionStorage.setItem('bussradar.swReloaded', '176');
       window.location.reload();
     });
 
-    navigator.serviceWorker.register('service-worker.js?v=166').then((registration) => {
+    navigator.serviceWorker.register('service-worker.js?v=176').then((registration) => {
       registration.update?.();
 
       if (registration.waiting) {

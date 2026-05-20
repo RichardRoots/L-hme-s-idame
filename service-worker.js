@@ -1,14 +1,14 @@
-const CACHE_NAME = 'bussradar-v166';
+const CACHE_NAME = 'bussradar-v176';
 const APP_SHELL = [
   './',
   './index.html',
   './reset.html',
   './login.html',
   './api.html',
-  './assets/css/styles.css?v=166',
-  './assets/js/static-api.js?v=166',
-  './assets/js/app.js?v=166',
-  './assets/js/auth.js?v=166',
+  './assets/css/styles.css?v=176',
+  './assets/js/static-api.js?v=176',
+  './assets/js/app.js?v=176',
+  './assets/js/auth.js?v=176',
   './assets/icon.svg',
   './assets/favicon-32.png',
   './assets/icon-192.png',

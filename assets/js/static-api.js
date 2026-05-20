@@ -115,6 +115,7 @@
 
   async function handleRoutes(params) {
     const lineFilter = normalizeLineList(params.get('lines') || '');
+    const wantedType = cleanText(params.get('type') || 'bus').toLowerCase();
     if (lineFilter.length === 0) {
       return { ok: true, routes: [] };
     }
@@ -129,13 +130,19 @@
       stopsByPlatformId.set(stop.stopId, stop);
     });
 
-    const stopRoutes = parseRouteLines(routesRaw, stopsByPlatformId, lineFilter);
-    const shapeRoutes = await parseOfficialLineShapeRoutes(lineFilter);
-    const routes = mergeShapeRoutesWithStops(shapeRoutes, stopRoutes);
+    const stopRoutes = parseRouteLines(routesRaw, stopsByPlatformId, lineFilter, false, wantedType);
+    const shapeRoutes = wantedType === 'bus'
+      ? await parseOfficialLineShapeRoutes(lineFilter, wantedType)
+      : [];
+    const routes = shapeRoutes.length > 0
+      ? mergeShapeRoutesWithStops(shapeRoutes, stopRoutes)
+      : stopRoutes.map((route) => ({ ...route, shapeQuality: 'route-stops' }));
 
     return {
       ok: true,
-      source: `${DATA_BASE}/data/tallinna-linn_bus_<line>.txt`,
+      source: wantedType === 'bus'
+        ? `${DATA_BASE}/data/tallinna-linn_bus_<line>.txt`
+        : `${DATA_BASE}/data/routes.txt`,
       updatedAt: new Date().toISOString(),
       routes,
     };
@@ -143,6 +150,7 @@
 
   async function handleSchedule(params) {
     const lineFilter = normalizeLineList(params.get('line') || params.get('lines') || '');
+    const wantedType = cleanText(params.get('type') || 'bus').toLowerCase();
     if (lineFilter.length === 0) {
       return { ok: true, routes: [] };
     }
@@ -157,7 +165,7 @@
       stopsByPlatformId.set(stop.stopId, stop);
     });
 
-    const routes = parseRouteLines(routesRaw, stopsByPlatformId, lineFilter, true);
+    const routes = parseRouteLines(routesRaw, stopsByPlatformId, lineFilter, true, wantedType);
 
     return {
       ok: true,
@@ -536,7 +544,7 @@
         return 'data/live/routes.txt';
       }
 
-      const shape = parsed.pathname.match(/^\/data\/tallinna-linn_bus_([^/]+)\.txt$/);
+      const shape = parsed.pathname.match(/^\/data\/tallinna-linn_(?:bus|tram)_([^/]+)\.txt$/);
       if (shape) {
         return `data/live/shapes/${encodeURIComponent(shape[1])}.txt`;
       }
@@ -737,7 +745,7 @@
     return [...lines].sort((a, b) => a.localeCompare(b, 'et', { numeric: true }));
   }
 
-  function parseRouteLines(raw, stopsByPlatformId, lineFilter, includeTimes = false) {
+  function parseRouteLines(raw, stopsByPlatformId, lineFilter, includeTimes = false, wantedType = 'bus') {
     const rows = tableRows(raw, ';');
     const routes = [];
     let currentLine = '';
@@ -765,7 +773,8 @@
         return;
       }
 
-      if (currentTransport && currentTransport !== 'bus') {
+      const typeMatches = !wantedType || wantedType === 'all' || currentTransport === wantedType;
+      if (currentTransport && !typeMatches) {
         return;
       }
 
@@ -792,6 +801,7 @@
 
       routes.push({
         line: currentLine,
+        type: currentTransport || wantedType || 'bus',
         tag: cleanText(row[8]),
         routeType: cleanText(row[9]),
         name: cleanText(row[10]),
@@ -807,12 +817,12 @@
     return routes;
   }
 
-  async function parseOfficialLineShapeRoutes(lineFilter) {
+  async function parseOfficialLineShapeRoutes(lineFilter, wantedType = 'bus') {
     const groups = await Promise.all(lineFilter.map(async (line) => {
-      const url = `${DATA_BASE}/data/tallinna-linn_bus_${encodeURIComponent(line)}.txt`;
+      const url = `${DATA_BASE}/data/tallinna-linn_${shapeTransportName(wantedType)}_${encodeURIComponent(line)}.txt`;
       try {
         const raw = await fetchText(url, { ttl: 60 * 60 * 1000 });
-        return parseOfficialLineShapeFile(line, raw);
+        return parseOfficialLineShapeFile(line, raw, wantedType);
       } catch {
         return [];
       }
@@ -824,7 +834,7 @@
     });
   }
 
-  function parseOfficialLineShapeFile(line, raw) {
+  function parseOfficialLineShapeFile(line, raw, wantedType = 'bus') {
     const routesByTag = new Map();
     let tag = '';
     let encoded = '';
@@ -838,6 +848,7 @@
       if (points.length >= 2) {
         const route = {
           line,
+          type: sanitizeTransportType(wantedType),
           tag,
           name: '',
           points,
@@ -1113,6 +1124,14 @@
     if (code === '1') return 'trolleybus';
     if (code === '3') return 'tram';
     return 'bus';
+  }
+
+  function sanitizeTransportType(type) {
+    return type === 'tram' ? 'tram' : 'bus';
+  }
+
+  function shapeTransportName(type) {
+    return sanitizeTransportType(type) === 'tram' ? 'tram' : 'bus';
   }
 
   function routeKey(line, tag) {

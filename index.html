@@ -20,7 +20,7 @@
   <link rel="preconnect" href="https://unpkg.com">
   <link rel="preconnect" href="https://tile.openstreetmap.org">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="assets/css/styles.css?v=166">
+  <link rel="stylesheet" href="assets/css/styles.css?v=176">
 </head>
 <body>
   <div class="app-shell">
@@ -39,6 +39,10 @@
       </button>
 
       <div class="topbar-actions">
+        <button class="mode-toggle-button" id="transportModeToggle" type="button" aria-pressed="false" title="Lülita trammid sisse" aria-label="Lülita trammid sisse">
+          <i data-lucide="tram-front"></i>
+          <span id="transportModeText">Trammid</span>
+        </button>
         <span class="status-pill" id="connectionStatus">Andmed ootavad</span>
         <button class="icon-button" id="helpButton" type="button" title="Kasutusõpetus" aria-label="Kasutusõpetus">
           <i data-lucide="circle-help"></i>
@@ -81,7 +85,7 @@
         <form class="schedule-form" id="scheduleForm">
           <div class="schedule-picker-grid">
             <label class="schedule-picker-field" for="scheduleLineSelect">
-              <span>Bussiliin</span>
+              <span id="scheduleLineLabel">Bussiliin</span>
               <select id="scheduleLineSelect" name="scheduleLine" aria-label="Vali bussiliini sõiduplaan">
                 <option value="">Laen liine...</option>
               </select>
@@ -110,12 +114,12 @@
         </button>
         <section class="panel-block">
           <div class="block-heading">
-            <h1>Valitud bussid</h1>
+            <h1 id="vehiclePanelTitle">Valitud bussid</h1>
             <span id="vehicleCount">0 kaardil</span>
           </div>
 
           <form class="line-form" id="lineForm">
-            <label class="field-label" for="lineInput">Liin</label>
+            <label class="field-label" id="lineLabel" for="lineInput">Bussiliin</label>
             <div class="inline-field">
               <input id="lineInput" name="line" type="text" autocomplete="off" inputmode="text" placeholder="nt 18">
               <button class="tool-button" type="submit">
@@ -210,7 +214,7 @@
         </section>
       </aside>
 
-      <section class="map-area" aria-label="Tallinna bussikaart">
+      <section class="map-area" aria-label="Tallinna ühistranspordikaart">
         <div id="map"></div>
       </section>
     </main>
@@ -218,7 +222,7 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
-  <script src="assets/js/static-api.js?v=166"></script>
-  <script src="assets/js/app.js?v=166" defer></script>
+  <script src="assets/js/static-api.js?v=176"></script>
+  <script src="assets/js/app.js?v=176" defer></script>
 </body>
 </html>

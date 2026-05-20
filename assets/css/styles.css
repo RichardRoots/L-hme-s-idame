@@ -167,7 +167,8 @@ button {
   gap: 8px;
 }
 
-.schedule-open-button {
+.schedule-open-button,
+.mode-toggle-button {
   min-height: 40px;
   display: inline-flex;
   align-items: center;
@@ -184,15 +185,28 @@ button {
 }
 
 .schedule-open-button:hover,
-.schedule-open-button.is-active {
+.schedule-open-button.is-active,
+.mode-toggle-button:hover,
+.mode-toggle-button.is-active {
   border-color: var(--brand);
   background: color-mix(in srgb, var(--brand) 14%, var(--panel));
   transform: translateY(-1px);
 }
 
-.schedule-open-button svg {
+.schedule-open-button svg,
+.mode-toggle-button svg {
   width: 18px;
   height: 18px;
+}
+
+.mode-toggle-button.is-active {
+  color: #7c2d12;
+  border-color: color-mix(in srgb, #f97316 42%, var(--line));
+  background: color-mix(in srgb, #f97316 13%, var(--panel));
+}
+
+.mode-toggle-button.is-active svg {
+  color: #ea580c;
 }
 
 .status-pill {
@@ -2426,6 +2440,11 @@ body.is-live-refreshing .status-pill {
   background: var(--brand);
 }
 
+.route-badge.tram,
+.legend-dot.tram {
+  background: #ea580c;
+}
+
 .legend-dot.crowd {
   background: var(--amber);
 }
@@ -2519,6 +2538,61 @@ body.is-live-refreshing .status-pill {
   inset: 7px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.2);
+}
+
+.vehicle-mode-symbol {
+  position: absolute;
+  left: 50%;
+  bottom: 4px;
+  z-index: 2;
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  color: rgba(255, 255, 255, 0.78);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.vehicle-mode-symbol svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 2.6;
+}
+
+.vehicle-marker.is-tram .vehicle-pin {
+  width: 50px;
+  height: 42px;
+  border-radius: 12px;
+  border-color: #fff7ed;
+  box-shadow: 0 0 0 4px rgba(249, 115, 22, 0.24), 0 10px 22px rgba(18, 34, 31, 0.32);
+}
+
+.vehicle-marker.is-tram .vehicle-pin::before {
+  inset: 6px 8px 18px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.vehicle-marker.is-tram .vehicle-pin::after {
+  content: "";
+  position: absolute;
+  left: 11px;
+  right: 11px;
+  bottom: 7px;
+  z-index: 1;
+  height: 4px;
+  border-top: 2px solid rgba(255, 255, 255, 0.82);
+  border-bottom: 2px solid rgba(255, 255, 255, 0.82);
+}
+
+.vehicle-marker.is-tram .vehicle-arrow {
+  top: -8px;
+  border-radius: 8px;
+}
+
+.vehicle-marker.is-tram .vehicle-type-badge.type-tram {
+  background: #ea580c;
 }
 
 .vehicle-arrow {
@@ -2648,6 +2722,52 @@ body.is-live-refreshing .status-pill {
 #map.show-vehicle-labels .vehicle-label {
   opacity: 1;
   transform: translateY(0);
+}
+
+.vehicle-marker.transfer-current .vehicle-pin {
+  border-color: #dffcf8;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--brand) 38%, transparent), 0 0 0 10px color-mix(in srgb, var(--brand) 16%, transparent), 0 13px 28px rgba(18, 34, 31, 0.38);
+  transform: translateY(-3px) scale(1.06);
+}
+
+.vehicle-marker.transfer-target .vehicle-pin {
+  border-color: #dbeafe;
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.34), 0 0 0 10px rgba(37, 99, 235, 0.14), 0 13px 28px rgba(18, 34, 31, 0.38);
+  transform: translateY(-3px) scale(1.06);
+}
+
+.vehicle-marker.transfer-current .vehicle-icon-wrap::after,
+.vehicle-marker.transfer-target .vehicle-icon-wrap::after {
+  min-height: 20px;
+  display: inline-flex;
+  align-items: center;
+  margin-top: -1px;
+  padding: 3px 8px 4px;
+  border: 1px solid #ffffff;
+  border-radius: 999px;
+  color: #ffffff;
+  box-shadow: 0 7px 16px rgba(18, 34, 31, 0.24);
+  font-size: 0.68rem;
+  font-weight: 950;
+  line-height: 1;
+}
+
+.vehicle-marker.transfer-current .vehicle-icon-wrap::after {
+  content: "Minu buss";
+  background: var(--brand);
+}
+
+body.transport-tram .vehicle-marker.transfer-current .vehicle-icon-wrap::after {
+  content: "Minu tramm";
+}
+
+.vehicle-marker.transfer-target .vehicle-icon-wrap::after {
+  content: "Sihtbuss";
+  background: #2563eb;
+}
+
+body.transport-tram .vehicle-marker.transfer-target .vehicle-icon-wrap::after {
+  content: "Sihttramm";
 }
 
 .vehicle-marker.risk-medium {
@@ -3231,6 +3351,55 @@ body.is-live-refreshing .status-pill {
   background: var(--brand);
 }
 
+.vehicle-transfer-selection {
+  display: grid;
+  gap: 4px;
+}
+
+.vehicle-transfer-selection span {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: 5px;
+  padding: 5px 7px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  background: var(--panel);
+}
+
+.vehicle-transfer-selection span.is-selected {
+  color: var(--ink);
+  border-color: color-mix(in srgb, var(--brand) 28%, var(--line));
+  background: color-mix(in srgb, var(--brand) 6%, var(--panel));
+}
+
+.vehicle-transfer-selection svg {
+  width: 13px;
+  height: 13px;
+  color: var(--brand);
+}
+
+.vehicle-transfer-selection b,
+.vehicle-transfer-selection small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vehicle-transfer-selection b {
+  font-size: 0.68rem;
+  font-weight: 950;
+}
+
+.vehicle-transfer-selection small {
+  color: inherit;
+  font-size: 0.66rem;
+  font-weight: 800;
+}
+
 .vehicle-transfer-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3270,6 +3439,11 @@ body.is-live-refreshing .status-pill {
   color: #ffffff;
   border-color: var(--brand);
   background: var(--brand);
+}
+
+.vehicle-transfer-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.46;
 }
 
 .vehicle-transfer-button.secondary {
@@ -3428,6 +3602,25 @@ body.is-live-refreshing .status-pill {
   border-radius: inherit;
   background: currentColor;
   content: '';
+}
+
+.vehicle-transfer-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.vehicle-transfer-facts span {
+  min-height: 22px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--panel);
+  font-size: 0.65rem;
+  font-weight: 850;
 }
 
 .vehicle-transfer-result.good strong {
@@ -3870,23 +4063,33 @@ body.is-live-refreshing .status-pill {
 :root[data-theme="dark"] .icon-button,
 :root[data-theme="dark"] .tool-button.secondary,
 :root[data-theme="dark"] .schedule-open-button,
+:root[data-theme="dark"] .mode-toggle-button,
 :root[data-theme="dark"] .install-help-card {
   border-color: color-mix(in srgb, var(--line) 92%, transparent);
   background: color-mix(in srgb, var(--panel) 92%, #0b0f14);
 }
 
-:root[data-theme="dark"] .schedule-open-button {
+:root[data-theme="dark"] .schedule-open-button,
+:root[data-theme="dark"] .mode-toggle-button {
   color: #8ee7df;
   border-color: color-mix(in srgb, var(--brand) 34%, var(--line));
   background: color-mix(in srgb, var(--brand) 7%, var(--panel));
 }
 
 :root[data-theme="dark"] .schedule-open-button:hover,
-:root[data-theme="dark"] .schedule-open-button.is-active {
+:root[data-theme="dark"] .schedule-open-button.is-active,
+:root[data-theme="dark"] .mode-toggle-button:hover,
+:root[data-theme="dark"] .mode-toggle-button.is-active {
   color: #c7fffb;
   border-color: color-mix(in srgb, var(--brand) 62%, var(--line));
   background: color-mix(in srgb, var(--brand) 13%, var(--panel));
   box-shadow: 0 8px 24px rgba(34, 211, 197, 0.1);
+}
+
+:root[data-theme="dark"] .mode-toggle-button.is-active {
+  color: #fed7aa;
+  border-color: color-mix(in srgb, #f97316 52%, var(--line));
+  background: color-mix(in srgb, #f97316 15%, var(--panel));
 }
 
 :root[data-theme="dark"] .schedule-panel-card,
@@ -4152,9 +4355,16 @@ body.is-live-refreshing .status-pill {
 :root[data-theme="dark"] .vehicle-transfer-toggle,
 :root[data-theme="dark"] .vehicle-transfer-stop,
 :root[data-theme="dark"] .vehicle-transfer-result,
+:root[data-theme="dark"] .vehicle-transfer-selection span,
+:root[data-theme="dark"] .vehicle-transfer-facts span,
 :root[data-theme="dark"] .vehicle-transfer-note {
   border-color: rgba(148, 163, 184, 0.14);
   background: #111821;
+}
+
+:root[data-theme="dark"] .vehicle-transfer-selection span.is-selected {
+  border-color: color-mix(in srgb, var(--brand) 30%, var(--line));
+  background: color-mix(in srgb, var(--brand) 7%, var(--panel));
 }
 
 :root[data-theme="dark"] .vehicle-transfer-button {
