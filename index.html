@@ -20,7 +20,7 @@
   <link rel="preconnect" href="https://unpkg.com">
   <link rel="preconnect" href="https://tile.openstreetmap.org">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="assets/css/styles.css?v=176">
+  <link rel="stylesheet" href="assets/css/styles.css?v=180">
 </head>
 <body>
   <div class="app-shell">
@@ -129,6 +129,14 @@
             </div>
           </form>
 
+          <button class="tram-map-toggle" id="tramBusOverlayToggle" type="button" hidden aria-pressed="true">
+            <span>
+              <i data-lucide="bus-front"></i>
+              <span id="tramBusOverlayText">Bussid kaardil</span>
+            </span>
+            <strong id="tramBusOverlayState">Sees</strong>
+          </button>
+
           <div class="line-control-list" id="selectedLines" aria-label="Valitud liinid"></div>
 
           <div class="metric-grid">
@@ -222,7 +230,7 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
-  <script src="assets/js/static-api.js?v=176"></script>
-  <script src="assets/js/app.js?v=176" defer></script>
+  <script src="assets/js/static-api.js?v=180"></script>
+  <script src="assets/js/app.js?v=180" defer></script>
 </body>
 </html>

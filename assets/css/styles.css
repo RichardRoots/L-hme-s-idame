@@ -820,6 +820,71 @@ body.is-live-refreshing .status-pill {
   box-shadow: 0 0 0 3px rgba(15, 94, 98, 0.13);
 }
 
+.tram-map-toggle {
+  width: 100%;
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 7px 9px;
+  border: 1px solid color-mix(in srgb, var(--brand) 38%, var(--line));
+  border-radius: 8px;
+  color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 7%, var(--panel));
+  font-weight: 850;
+  text-align: left;
+  transition: border-color var(--motion-fast) ease, background var(--motion-fast) ease, color var(--motion-fast) ease, transform var(--motion-fast) var(--motion-curve);
+}
+
+.tram-map-toggle[hidden] {
+  display: none !important;
+}
+
+.tram-map-toggle:hover {
+  border-color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 12%, var(--panel));
+  transform: translateY(-1px);
+}
+
+.tram-map-toggle > span {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tram-map-toggle svg {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+}
+
+.tram-map-toggle strong {
+  flex: 0 0 auto;
+  min-width: 48px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  color: #ffffff;
+  background: var(--brand);
+  font-size: 0.72rem;
+  line-height: 1.2;
+  text-align: center;
+}
+
+.tram-map-toggle.is-off {
+  color: #6b7280;
+  border-color: color-mix(in srgb, var(--line) 72%, var(--muted));
+  background: color-mix(in srgb, var(--muted) 7%, var(--panel));
+}
+
+.tram-map-toggle.is-off strong {
+  color: #374151;
+  background: color-mix(in srgb, var(--muted) 18%, var(--panel));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--muted) 22%, var(--line));
+}
+
 .line-control-list {
   display: grid;
   gap: 8px;
@@ -2440,7 +2505,10 @@ body.is-live-refreshing .status-pill {
   background: var(--brand);
 }
 
-.route-badge.tram,
+.route-badge.tram {
+  background: var(--badge-color, #ea580c);
+}
+
 .legend-dot.tram {
   background: #ea580c;
 }
@@ -2561,38 +2629,73 @@ body.is-live-refreshing .status-pill {
 }
 
 .vehicle-marker.is-tram .vehicle-pin {
-  width: 50px;
-  height: 42px;
-  border-radius: 12px;
-  border-color: #fff7ed;
-  box-shadow: 0 0 0 4px rgba(249, 115, 22, 0.24), 0 10px 22px rgba(18, 34, 31, 0.32);
+  width: 42px;
+  height: 46px;
+  border-radius: 14px 14px 10px 10px;
+  border-color: #ffffff;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--vehicle-color, #ea580c) 82%, #ffffff) 0%, var(--vehicle-color, #ea580c) 58%, color-mix(in srgb, var(--vehicle-color, #ea580c) 78%, #111827) 100%);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--vehicle-color, #ea580c) 18%, transparent), 0 8px 18px rgba(18, 34, 31, 0.26);
+}
+
+.vehicle-marker.is-tram .vehicle-pulse {
+  inset: 6px;
+  border-radius: 15px;
+  opacity: 0.58;
 }
 
 .vehicle-marker.is-tram .vehicle-pin::before {
-  inset: 6px 8px 18px;
-  border-radius: 7px;
-  background: rgba(255, 255, 255, 0.22);
+  inset: auto;
+  left: 7px;
+  right: 7px;
+  top: 6px;
+  height: 14px;
+  border-radius: 7px 7px 4px 4px;
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.92) 0 44%, rgba(255, 255, 255, 0.42) 44% 56%, rgba(255, 255, 255, 0.92) 56% 100%);
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.58), 0 1px 2px rgba(18, 34, 31, 0.12);
 }
 
 .vehicle-marker.is-tram .vehicle-pin::after {
   content: "";
   position: absolute;
-  left: 11px;
-  right: 11px;
-  bottom: 7px;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
   z-index: 1;
-  height: 4px;
-  border-top: 2px solid rgba(255, 255, 255, 0.82);
-  border-bottom: 2px solid rgba(255, 255, 255, 0.82);
+  height: 6px;
+  border: 0;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 4px 50%, #ffffff 0 1.8px, transparent 2.4px),
+    radial-gradient(circle at calc(100% - 4px) 50%, #ffffff 0 1.8px, transparent 2.4px),
+    linear-gradient(90deg, transparent 0 33%, rgba(255, 255, 255, 0.74) 33% 41%, transparent 41% 59%, rgba(255, 255, 255, 0.74) 59% 67%, transparent 67% 100%);
 }
 
 .vehicle-marker.is-tram .vehicle-arrow {
   top: -8px;
+  width: 20px;
+  height: 20px;
   border-radius: 8px;
 }
 
 .vehicle-marker.is-tram .vehicle-type-badge.type-tram {
-  background: #ea580c;
+  display: none;
+}
+
+.vehicle-marker.is-tram .vehicle-mode-symbol {
+  display: none;
+}
+
+.vehicle-marker.is-tram .vehicle-pin strong {
+  position: absolute;
+  left: 50%;
+  top: 24px;
+  transform: translateX(-50%);
+  max-width: 34px;
+  font-size: 0.92rem;
+  letter-spacing: 0;
+  text-shadow: 0 1px 2px rgba(18, 34, 31, 0.4);
 }
 
 .vehicle-arrow {
@@ -2757,7 +2860,7 @@ body.is-live-refreshing .status-pill {
   background: var(--brand);
 }
 
-body.transport-tram .vehicle-marker.transfer-current .vehicle-icon-wrap::after {
+.vehicle-marker.is-tram.transfer-current .vehicle-icon-wrap::after {
   content: "Minu tramm";
 }
 
@@ -2766,7 +2869,7 @@ body.transport-tram .vehicle-marker.transfer-current .vehicle-icon-wrap::after {
   background: #2563eb;
 }
 
-body.transport-tram .vehicle-marker.transfer-target .vehicle-icon-wrap::after {
+.vehicle-marker.is-tram.transfer-target .vehicle-icon-wrap::after {
   content: "Sihttramm";
 }
 
@@ -4192,6 +4295,29 @@ body.transport-tram .vehicle-marker.transfer-target .vehicle-icon-wrap::after {
   background: color-mix(in srgb, var(--brand-2) 9%, var(--panel));
 }
 
+:root[data-theme="dark"] .tram-map-toggle {
+  color: #9eece5;
+  border-color: color-mix(in srgb, var(--brand) 32%, var(--line));
+  background: color-mix(in srgb, var(--brand) 8%, #111821);
+}
+
+:root[data-theme="dark"] .tram-map-toggle:hover {
+  border-color: color-mix(in srgb, var(--brand) 58%, var(--line));
+  background: color-mix(in srgb, var(--brand) 13%, #111821);
+}
+
+:root[data-theme="dark"] .tram-map-toggle.is-off {
+  color: #94a3b8;
+  border-color: rgba(148, 163, 184, 0.17);
+  background: #0f151d;
+}
+
+:root[data-theme="dark"] .tram-map-toggle.is-off strong {
+  color: #cbd5e1;
+  background: rgba(148, 163, 184, 0.13);
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.18);
+}
+
 :root[data-theme="dark"] .vehicle-row-risk {
   color: #f0c885;
   border-color: color-mix(in srgb, var(--amber) 34%, var(--line));
@@ -4777,8 +4903,17 @@ body.transport-tram .vehicle-marker.transfer-target .vehicle-icon-wrap::after {
     padding: 0;
   }
 
-  .schedule-open-button span {
+  .schedule-open-button span,
+  .mode-toggle-button span {
     display: none;
+  }
+
+  .mode-toggle-button {
+    width: 38px;
+    min-width: 38px;
+    min-height: 38px;
+    justify-content: center;
+    padding: 0;
   }
 
   .topbar .icon-button,
@@ -4867,12 +5002,42 @@ body.transport-tram .vehicle-marker.transfer-target .vehicle-icon-wrap::after {
   }
 
   .line-control-row {
-    grid-template-columns: auto minmax(120px, 190px) auto;
+    grid-template-columns: auto minmax(0, 1fr) auto;
     grid-template-areas:
       "badge slider remove"
       "badge value remove";
     gap: 9px;
     padding: 9px;
+  }
+
+  .line-opacity-control {
+    max-width: none;
+  }
+
+  .vehicle-marker.is-tram .vehicle-pin {
+    width: 38px;
+    height: 42px;
+    border-width: 2.5px;
+    border-radius: 13px 13px 9px 9px;
+  }
+
+  .vehicle-marker.is-tram .vehicle-pin::before {
+    left: 6px;
+    right: 6px;
+    top: 6px;
+    height: 13px;
+  }
+
+  .vehicle-marker.is-tram .vehicle-pin::after {
+    left: 7px;
+    right: 7px;
+    bottom: 7px;
+  }
+
+  .vehicle-marker.is-tram .vehicle-pin strong {
+    top: 22px;
+    transform: translateX(-50%);
+    font-size: 0.84rem;
   }
 
   .line-emphasis-value {

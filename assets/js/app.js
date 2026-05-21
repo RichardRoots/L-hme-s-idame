@@ -9,6 +9,7 @@ const REFRESH_SECONDS = 10;
 const WEATHER_REFRESH_MS = 10 * 60 * 1000;
 const GPS_REFRESH_MS = 5000;
 const TRANSPORT_TYPE_KEY = 'bussradar.transportType';
+const TRAM_BUS_OVERLAY_KEY = 'bussradar.tramBusOverlay';
 const INITIAL_TRANSPORT_TYPE = loadTransportType();
 const THEME_KEY = 'bussradar.theme';
 const ONBOARDING_KEY = 'bussradar.onboardingSeen.v1';
@@ -45,6 +46,7 @@ const state = {
   mapStopMarkers: new Map(),
   favoriteStopMarkers: new Map(),
   transportType: INITIAL_TRANSPORT_TYPE,
+  showBusesInTram: loadTramBusOverlay(),
   selectedLines: loadLines(INITIAL_TRANSPORT_TYPE),
   lineColors: loadLineColors(),
   lineEmphasis: loadLineEmphasis(),
@@ -128,6 +130,9 @@ function cacheElements() {
   els.connectionStatus = document.querySelector('#connectionStatus');
   els.transportModeToggle = document.querySelector('#transportModeToggle');
   els.transportModeText = document.querySelector('#transportModeText');
+  els.tramBusOverlayToggle = document.querySelector('#tramBusOverlayToggle');
+  els.tramBusOverlayText = document.querySelector('#tramBusOverlayText');
+  els.tramBusOverlayState = document.querySelector('#tramBusOverlayState');
   els.vehiclePanelTitle = document.querySelector('#vehiclePanelTitle');
   els.vehicleCount = document.querySelector('#vehicleCount');
   els.lastUpdated = document.querySelector('#lastUpdated');
@@ -254,6 +259,35 @@ function activeTransportType() {
   return sanitizeTransportType(state.transportType);
 }
 
+function visibleTransportTypes() {
+  if (activeTransportType() !== 'tram') {
+    return ['bus'];
+  }
+
+  return state.showBusesInTram ? ['bus', 'tram'] : ['tram'];
+}
+
+function selectedLinesForTransport(type = activeTransportType()) {
+  const normalizedType = sanitizeTransportType(type);
+  return normalizedType === activeTransportType()
+    ? [...state.selectedLines]
+    : loadLines(normalizedType);
+}
+
+function visibleLineConfigs() {
+  return visibleTransportTypes()
+    .map((type) => ({
+      type,
+      lines: uniqueSortedLines(selectedLinesForTransport(type)),
+    }))
+    .filter((config) => config.lines.length > 0);
+}
+
+function transportMapOpacity(type = activeTransportType()) {
+  const normalizedType = sanitizeTransportType(type);
+  return activeTransportType() === 'tram' && normalizedType === 'bus' ? 0.32 : 1;
+}
+
 function transportLabel(type = activeTransportType()) {
   return sanitizeTransportType(type) === 'tram' ? 'tramm' : 'buss';
 }
@@ -306,6 +340,10 @@ function transportLineKey(line, type = activeTransportType()) {
   return `${sanitizeTransportType(type)}:${normalizeLine(String(line || ''))}`;
 }
 
+function lineStateKey(line, type = activeTransportType()) {
+  return transportLineKey(line, type);
+}
+
 function updateTransportUi() {
   const type = activeTransportType();
   const tram = type === 'tram';
@@ -331,6 +369,22 @@ function updateTransportUi() {
   }
   if (els.lineInput) {
     els.lineInput.placeholder = tram ? 'nt 1' : 'nt 18';
+  }
+  if (els.tramBusOverlayToggle) {
+    const busesVisible = Boolean(state.showBusesInTram);
+    const label = busesVisible ? 'Bussid kaardil' : 'Bussid peidetud';
+    const title = busesVisible ? 'Peida bussid trammivaates' : 'Näita bussid trammivaates';
+    els.tramBusOverlayToggle.hidden = !tram;
+    els.tramBusOverlayToggle.classList.toggle('is-off', !busesVisible);
+    els.tramBusOverlayToggle.setAttribute('aria-pressed', busesVisible ? 'true' : 'false');
+    els.tramBusOverlayToggle.setAttribute('aria-label', title);
+    els.tramBusOverlayToggle.title = title;
+    if (els.tramBusOverlayText) {
+      els.tramBusOverlayText.textContent = label;
+    }
+    if (els.tramBusOverlayState) {
+      els.tramBusOverlayState.textContent = busesVisible ? 'Sees' : 'Väljas';
+    }
   }
   if (els.scheduleLineLabel) {
     els.scheduleLineLabel.textContent = transportLineLabel(type);
@@ -685,6 +739,26 @@ function bindEvents() {
     setTransportType(activeTransportType() === 'tram' ? 'bus' : 'tram');
   });
 
+  els.tramBusOverlayToggle?.addEventListener('click', () => {
+    if (activeTransportType() !== 'tram') {
+      return;
+    }
+
+    state.showBusesInTram = !state.showBusesInTram;
+    saveTramBusOverlay();
+    updateTransportUi();
+    if (!state.showBusesInTram) {
+      state.vehicles = state.vehicles.filter((vehicle) => vehicleTransportType(vehicle) === 'tram');
+      state.routes = state.routes.filter((route) => routeTransportType(route) === 'tram');
+      renderVehicles();
+      renderRoutes();
+      renderRouteStops();
+    }
+    state.shouldFitVehicles = true;
+    fetchVehicles();
+    fetchRoutes();
+  });
+
   els.lineForm.addEventListener('submit', (event) => {
     event.preventDefault();
     const value = normalizeLine(els.lineInput.value);
@@ -941,7 +1015,7 @@ function applyUserPreferences(preferences, reload = false) {
 function sanitizeLineColors(colors) {
   return Object.fromEntries(
     Object.entries(colors)
-      .map(([line, color]) => [normalizeLine(String(line)), String(color)])
+      .map(([line, color]) => [normalizeLineStateKey(line), String(color)])
       .filter(([line, color]) => line && isHexColor(color))
   );
 }
@@ -949,9 +1023,20 @@ function sanitizeLineColors(colors) {
 function sanitizeLineEmphasis(values) {
   return Object.fromEntries(
     Object.entries(values)
-      .map(([line, value]) => [normalizeLine(String(line)), clampNumber(Number(value), 0, 1)])
+      .map(([line, value]) => [normalizeLineStateKey(line), clampNumber(Number(value), 0, 1)])
       .filter(([line, value]) => line && Number.isFinite(value))
   );
+}
+
+function normalizeLineStateKey(value) {
+  const text = String(value || '').trim();
+  const match = text.match(/^(bus|tram):(.+)$/i);
+  if (match) {
+    const line = normalizeLine(match[2]);
+    return line ? lineStateKey(line, match[1].toLowerCase()) : '';
+  }
+
+  return normalizeLine(text);
 }
 
 function queuePreferenceSave() {
@@ -1132,7 +1217,8 @@ function startRefreshLoop() {
 }
 
 async function fetchVehicles() {
-  if (state.selectedLines.length === 0) {
+  const configs = visibleLineConfigs();
+  if (configs.length === 0) {
     state.vehicles = [];
     renderVehicles();
     renderDelayPanel();
@@ -1140,17 +1226,30 @@ async function fetchVehicles() {
     return;
   }
 
-  setStatus(`Laen ${transportPluralLabel()}`, false);
-  const params = new URLSearchParams({
-    action: 'vehicles',
-    type: activeTransportType(),
-    lines: state.selectedLines.join(','),
-  });
+  setStatus(activeTransportType() === 'tram' && state.showBusesInTram ? 'Laen busse ja tramme' : `Laen ${transportPluralLabel()}`, false);
 
   try {
-    const data = await fetchJson(`api.html?${params.toString()}`);
-    state.vehicles = (data.vehicles || []).filter(isVehicleCoordinate);
-    await ensureDelaySchedules(uniqueSortedLines(state.vehicles.map((vehicle) => vehicle.line)), activeTransportType());
+    const groups = await Promise.all(configs.map(async (config) => {
+      const params = new URLSearchParams({
+        action: 'vehicles',
+        type: config.type,
+        lines: config.lines.join(','),
+      });
+      const data = await fetchJson(`api.html?${params.toString()}`);
+      return (data.vehicles || [])
+        .filter((vehicle) => vehicleTransportType(vehicle) === config.type)
+        .filter(isVehicleCoordinate);
+    }));
+
+    state.vehicles = groups.flat();
+    await Promise.all(configs.map((config) => {
+      const lines = uniqueSortedLines(
+        state.vehicles
+          .filter((vehicle) => vehicleTransportType(vehicle) === config.type)
+          .map((vehicle) => vehicle.line),
+      );
+      return ensureDelaySchedules(lines, config.type);
+    }));
     renderVehicles();
     renderDelayPanel();
     els.lastUpdated.textContent = timeNow();
@@ -1188,7 +1287,7 @@ function renderVehicles() {
   const activeKeys = new Set();
 
   state.vehicles.forEach((vehicle) => {
-    const opacity = lineMapOpacity(vehicle.line);
+    const opacity = lineMapOpacity(vehicle.line, vehicleTransportType(vehicle)) * transportMapOpacity(vehicleTransportType(vehicle));
     if (opacity <= 0) {
       return;
     }
@@ -1239,7 +1338,8 @@ function renderVehicles() {
     }
   });
 
-  els.vehicleCount.textContent = `${activeKeys.size} kaardil`;
+  const panelVehicleCount = state.vehicles.filter((vehicle) => vehicleTransportType(vehicle) === activeTransportType()).length;
+  els.vehicleCount.textContent = `${panelVehicleCount} kaardil`;
   renderVehicleList();
   renderTransferVehicleOptions('current');
   renderTransferVehicleOptions('target');
@@ -1401,25 +1501,47 @@ function shouldShowFullMapStops() {
 }
 
 function stopLineColor(stop) {
-  const lines = stopLines(stop);
-  if (lines.length === 0) {
+  const refs = stopLineRefs(stop);
+  if (refs.length === 0) {
     return MAP_STOP_FALLBACK_COLOR;
   }
 
-  const bestLine = lines
-    .map((line) => ({ line, opacity: lineMapOpacity(line) }))
+  const bestLine = refs
+    .map((ref) => ({ ...ref, opacity: lineMapOpacity(ref.line, ref.type) }))
     .sort((a, b) => b.opacity - a.opacity || a.line.localeCompare(b.line, 'et', { numeric: true }))[0];
 
-  return routeColor(bestLine.line);
+  return routeColor(bestLine.line, bestLine.type);
 }
 
 function stopMapOpacity(stop) {
-  const lines = stopLines(stop);
-  if (lines.length === 0) {
+  const refs = stopLineRefs(stop);
+  if (refs.length === 0) {
     return 1;
   }
 
-  return Math.max(...lines.map(lineMapOpacity));
+  return Math.max(...refs.map((ref) => lineMapOpacity(ref.line, ref.type) * transportMapOpacity(ref.type)));
+}
+
+function stopLineRefs(stop) {
+  if (Array.isArray(stop.lineRefs) && stop.lineRefs.length > 0) {
+    const refs = stop.lineRefs
+      .map((ref) => ({
+        line: normalizeLine(String(ref?.line || '')),
+        type: sanitizeTransportType(ref?.type || activeTransportType()),
+      }))
+      .filter((ref) => ref.line);
+    const seen = new Set();
+    return refs.filter((ref) => {
+      const key = lineStateKey(ref.line, ref.type);
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+  }
+
+  return stopLines(stop).map((line) => ({ line, type: activeTransportType() }));
 }
 
 function stopLines(stop) {
@@ -1700,6 +1822,7 @@ function renderTransferVehicleOptions(kind = 'current') {
 function transferVehicleOptions() {
   return [...state.vehicles]
     .filter(isVehicleCoordinate)
+    .filter((vehicle) => vehicleTransportType(vehicle) === activeTransportType())
     .sort((a, b) => {
       return String(a.line).localeCompare(String(b.line), 'et', { numeric: true })
         || String(a.destination || '').localeCompare(String(b.destination || ''), 'et')
@@ -3735,21 +3858,25 @@ async function fetchRoutes() {
   state.routeLayer.clearLayers();
   state.routes = [];
 
-  if (state.selectedLines.length === 0) {
+  const configs = visibleLineConfigs();
+  if (configs.length === 0) {
     state.mapStops = [];
     renderMapStops();
     return;
   }
 
-  const params = new URLSearchParams({
-    action: 'routes',
-    type: activeTransportType(),
-    lines: state.selectedLines.join(','),
-  });
-
   try {
-    const data = await fetchJson(`api.html?${params.toString()}`);
-    state.routes = data.routes || [];
+    const groups = await Promise.all(configs.map(async (config) => {
+      const params = new URLSearchParams({
+        action: 'routes',
+        type: config.type,
+        lines: config.lines.join(','),
+      });
+      const data = await fetchJson(`api.html?${params.toString()}`);
+      return (data.routes || []).filter((route) => routeTransportType(route) === config.type);
+    }));
+
+    state.routes = groups.flat();
     renderRoutes();
     renderRouteStops();
     if (state.schools.length > 0) {
@@ -3768,7 +3895,7 @@ function renderRoutes() {
   const drawableRoutes = state.routes
     .filter((route) => route.shapeQuality !== 'stops-only')
     .filter((route) => Array.isArray(route.points) && route.points.length >= 2)
-    .filter((route) => lineMapOpacity(route.line) > 0);
+    .filter((route) => lineMapOpacity(route.line, routeTransportType(route)) * transportMapOpacity(routeTransportType(route)) > 0);
   const styledRoutes = drawableRoutes
     .map((route) => ({ route, style: routePhysicalSideStyle(route, drawableRoutes) }))
     .sort((a, b) => a.style.priority - b.style.priority
@@ -3799,17 +3926,17 @@ function renderOverviewRoutes(styledRoutes) {
     }
 
     const color = routeColor(route.line, routeTransportType(route));
-    const emphasis = lineMapOpacity(route.line);
+    const emphasis = lineMapOpacity(route.line, routeTransportType(route)) * transportMapOpacity(routeTransportType(route));
     const dark = state.theme === 'dark';
     const tram = routeTransportType(route) === 'tram';
-    const mainDash = tram ? '9 5' : style.dashArray;
-    const mainWeight = style.weight + (tram ? 2 : 0) + (dark ? 1 : 0);
+    const mainDash = tram ? null : style.dashArray;
+    const mainWeight = style.weight + (dark ? 1 : 0);
 
     L.polyline(segments, {
       pane: 'routePane',
       color: tram ? tramRouteRailColor() : routeGapColor(),
-      weight: style.weight + (tram ? 7 : (dark ? 5 : 3)),
-      opacity: tram ? (dark ? 0.62 : 0.52) : (dark ? (style.dashArray ? 0.72 : 0.58) : (style.dashArray ? 0.58 : 0.44)),
+      weight: style.weight + (tram ? 4 : (dark ? 5 : 3)),
+      opacity: (tram ? (dark ? 0.54 : 0.64) : (dark ? (style.dashArray ? 0.72 : 0.58) : (style.dashArray ? 0.58 : 0.44))) * transportMapOpacity(routeTransportType(route)),
       lineCap: 'round',
       lineJoin: 'round',
       dashArray: tram ? null : style.dashArray,
@@ -3822,8 +3949,8 @@ function renderOverviewRoutes(styledRoutes) {
       pane: 'routePane',
       color,
       weight: mainWeight,
-      opacity: Math.min(1, (dark ? 1 : 0.9) * emphasis),
-      lineCap: tram ? 'butt' : 'round',
+      opacity: Math.min(1, (dark ? 0.96 : 0.92) * emphasis),
+      lineCap: 'round',
       lineJoin: 'round',
       dashArray: mainDash,
       dashOffset: style.dashOffset,
@@ -3833,12 +3960,12 @@ function renderOverviewRoutes(styledRoutes) {
     if (tram) {
       L.polyline(segments, {
         pane: 'routePane',
-        color: state.theme === 'dark' ? '#f8fafc' : '#ffffff',
-        weight: 2,
-        opacity: Math.min(0.82, 0.58 * emphasis),
-        lineCap: 'butt',
+        color: state.theme === 'dark' ? '#fff7ed' : '#fffaf0',
+        weight: 1.35,
+        opacity: Math.min(0.62, 0.46 * emphasis),
+        lineCap: 'round',
         lineJoin: 'round',
-        dashArray: '1 12',
+        dashArray: '2 14',
         smoothFactor: 1.5,
         interactive: false,
       }).addTo(state.routeLayer);
@@ -3853,9 +3980,11 @@ function renderOverviewRoutes(styledRoutes) {
 
 function routeNeedsOverviewSideOffset(route, styledRoutes) {
   const routeCenter = routeScreenCenter(route);
+  const routeType = routeTransportType(route);
   return styledRoutes.some((entry) => {
     return entry.route !== route
       && String(entry.route.line) === String(route.line)
+      && routeTransportType(entry.route) === routeType
       && routeDirectionIndex(entry.route) % 2 !== routeDirectionIndex(route) % 2
       && layerPointDistance(routeCenter, routeScreenCenter(entry.route)) <= ROUTE_SIDE_CENTER_EPS_PX;
   });
@@ -3919,9 +4048,10 @@ function routeDrawingSegments(styledRoutes) {
           route,
           style,
           line: String(route.line),
+          lineKey: lineStateKey(route.line, routeTransportType(route)),
           points: [start, end],
           color: routeColor(route.line, routeTransportType(route)),
-          opacity: 0.98 * lineMapOpacity(route.line),
+          opacity: 0.98 * lineMapOpacity(route.line, routeTransportType(route)) * transportMapOpacity(routeTransportType(route)),
           direction: routeDirectionIndex(route) % 2,
           heading: routeSegmentHeadingDegrees(start, end),
           midpoint: routeSegmentMidpoint(start, end),
@@ -3951,7 +4081,7 @@ function routeDrawingRuns(routeSegments) {
   let current = null;
 
   prepared.forEach((segment) => {
-    if (current && canExtendRouteRun(current, segment)) {
+  if (current && canExtendRouteRun(current, segment)) {
       current.points.push(segment.points[1]);
       return;
     }
@@ -3964,6 +4094,7 @@ function routeDrawingRuns(routeSegments) {
       route: segment.route,
       style: segment.style,
       line: segment.line,
+      lineKey: segment.lineKey,
       color: segment.color,
       opacity: segment.opacity,
       pattern: segment.pattern,
@@ -3983,6 +4114,7 @@ function routeDrawingRuns(routeSegments) {
 function canExtendRouteRun(run, segment) {
   if (run.route !== segment.route
     || run.line !== segment.line
+    || run.lineKey !== segment.lineKey
     || run.style.mapSide !== segment.style.mapSide
     || run.patternKey !== segment.patternKey
     || run.offset !== segment.offset) {
@@ -4066,11 +4198,14 @@ function routePhysicalSideStyle(route, routes) {
 function closestOppositeRoute(route, routes) {
   const direction = routeDirectionIndex(route) % 2;
   const center = routeScreenCenter(route);
+  const routeType = routeTransportType(route);
   let best = null;
   let bestDistance = Infinity;
 
   routes.forEach((candidate) => {
-    if (candidate === route || String(candidate.line) !== String(route.line)) {
+    if (candidate === route
+      || String(candidate.line) !== String(route.line)
+      || routeTransportType(candidate) !== routeType) {
       return;
     }
 
@@ -4115,7 +4250,7 @@ function routeSegmentPattern(segment, allSegments) {
 }
 
 function routeSegmentPeerLines(segment, allSegments) {
-  const lines = new Set([segment.line]);
+  const lines = new Set([segment.lineKey || segment.line]);
 
   allSegments.forEach((other) => {
     if (other === segment || other.style.mapSide !== segment.style.mapSide) {
@@ -4127,7 +4262,7 @@ function routeSegmentPeerLines(segment, allSegments) {
     }
 
     if (layerPointDistance(segment.midpoint, other.midpoint) <= ROUTE_OVERLAP_DISTANCE_PX) {
-      lines.add(other.line);
+      lines.add(other.lineKey || other.line);
     }
   });
 
@@ -4137,7 +4272,7 @@ function routeSegmentPeerLines(segment, allSegments) {
 function routeSegmentNeedsSideOffset(segment, allSegments) {
   return allSegments.some((other) => {
     return other !== segment
-      && other.line === segment.line
+      && (other.lineKey || other.line) === (segment.lineKey || segment.line)
       && other.direction !== segment.direction
       && routeHeadingDifference(segment.heading, other.heading) <= ROUTE_SEGMENT_HEADING_TOLERANCE
       && layerPointDistance(segment.midpoint, other.midpoint) <= ROUTE_SIDE_CENTER_EPS_PX;
@@ -4287,7 +4422,7 @@ function routeGapColor() {
 }
 
 function tramRouteRailColor() {
-  return state.theme === 'dark' ? '#0b1117' : '#4b5563';
+  return state.theme === 'dark' ? '#1f2937' : '#ffffff';
 }
 
 function routeDirectionStyle(route) {
@@ -4301,7 +4436,10 @@ function routeDirectionIndex(route) {
   if (/^a\d*-b\d*$/.test(tag)) return 0;
   if (/^b\d*-a\d*$/.test(tag)) return 1;
 
-  const sameLineRoutes = state.routes.filter((item) => String(item.line) === String(route.line));
+  const routeType = routeTransportType(route);
+  const sameLineRoutes = state.routes.filter((item) => {
+    return String(item.line) === String(route.line) && routeTransportType(item) === routeType;
+  });
   const routeIndex = sameLineRoutes.indexOf(route);
   return routeIndex >= 0 ? routeIndex : 0;
 }
@@ -4312,12 +4450,19 @@ function renderRouteStops() {
   state.routes.forEach((route) => {
     (route.stops || []).forEach((stop) => {
       const key = stop.stopId || stop.id;
+      const lineRef = {
+        line: normalizeLine(String(route.line || '')),
+        type: routeTransportType(route),
+      };
       if (!stopsById.has(key)) {
-        stopsById.set(key, { ...stop, lines: [route.line] });
+        stopsById.set(key, { ...stop, lines: [route.line], lineRefs: [lineRef] });
       } else {
         const existing = stopsById.get(key);
         if (!existing.lines.includes(route.line)) {
           existing.lines.push(route.line);
+        }
+        if (!existing.lineRefs?.some((ref) => ref.line === lineRef.line && ref.type === lineRef.type)) {
+          existing.lineRefs = [...(existing.lineRefs || []), lineRef];
         }
       }
     });
@@ -4368,12 +4513,14 @@ function renderVehicleList() {
     return;
   }
 
-  if (state.vehicles.length === 0) {
+  const visibleVehicles = state.vehicles.filter((vehicle) => vehicleTransportType(vehicle) === activeTransportType());
+
+  if (visibleVehicles.length === 0) {
     els.vehicleList.innerHTML = `<div class="empty-state">Selle liini ${transportLabel()}i ei leitud</div>`;
     return;
   }
 
-  const vehicles = [...state.vehicles].sort((a, b) => {
+  const vehicles = [...visibleVehicles].sort((a, b) => {
     return a.line.localeCompare(b.line, 'et', { numeric: true })
       || String(a.destination || '').localeCompare(String(b.destination || ''), 'et');
   });
@@ -6422,31 +6569,32 @@ function renderLineTags() {
     return;
   }
 
+  const type = activeTransportType();
   els.selectedLines.innerHTML = state.selectedLines.map((line) => {
-    const color = routeColor(line);
-    const emphasis = Math.round(lineEmphasis(line) * 100);
+    const color = routeColor(line, type);
+    const emphasis = Math.round(lineEmphasis(line, type) * 100);
     const sliderShellStyle = lineSliderShellStyle(color, emphasis);
     const sliderInputStyle = lineSliderInputStyle(color, emphasis);
     const sliderTrackStyle = lineSliderTrackStyle(color);
     const sliderFillStyle = lineSliderFillStyle(color, emphasis);
     const sliderThumbStyle = lineSliderThumbStyle(color, emphasis);
     return `
-      <div class="line-control-row" data-line="${escapeHtml(line)}" style="--line-color: ${color}; --line-emphasis: ${emphasis}%">
+      <div class="line-control-row" data-line="${escapeHtml(line)}" data-transport-type="${escapeHtml(type)}" style="--line-color: ${color}; --line-emphasis: ${emphasis}%">
         <label class="line-color-picker" title="Muuda liini ${escapeHtml(line)} värvi">
           <span class="route-badge compact ${activeTransportType() === 'tram' ? 'tram' : ''}" style="--badge-color: ${color}">${escapeHtml(line)}</span>
-          <input class="line-color-input" type="color" value="${escapeHtml(color)}" data-line="${escapeHtml(line)}" aria-label="Vali liini ${escapeHtml(line)} värv">
+          <input class="line-color-input" type="color" value="${escapeHtml(color)}" data-line="${escapeHtml(line)}" data-transport-type="${escapeHtml(type)}" aria-label="Vali liini ${escapeHtml(line)} värv">
         </label>
         <label class="line-opacity-control">
           <span>Nähtavus</span>
           <span class="line-slider-shell" style="${escapeHtml(sliderShellStyle)}">
-            <input class="line-emphasis-input" type="range" min="0" max="100" step="5" value="${emphasis}" data-line="${escapeHtml(line)}" style="${escapeHtml(sliderInputStyle)}" aria-label="Muuda liini ${escapeHtml(line)} nähtavust">
+            <input class="line-emphasis-input" type="range" min="0" max="100" step="5" value="${emphasis}" data-line="${escapeHtml(line)}" data-transport-type="${escapeHtml(type)}" style="${escapeHtml(sliderInputStyle)}" aria-label="Muuda liini ${escapeHtml(line)} nähtavust">
             <span class="line-slider-track" style="${escapeHtml(sliderTrackStyle)}" aria-hidden="true">
               <span class="line-slider-fill" style="${escapeHtml(sliderFillStyle)}"></span>
             </span>
             <span class="line-slider-thumb" style="${escapeHtml(sliderThumbStyle)}" aria-hidden="true"></span>
           </span>
         </label>
-        <strong class="line-emphasis-value" data-line="${escapeHtml(line)}">${emphasis}%</strong>
+        <strong class="line-emphasis-value" data-line="${escapeHtml(line)}" data-transport-type="${escapeHtml(type)}">${emphasis}%</strong>
         <button class="line-remove" type="button" data-line="${escapeHtml(line)}" title="Eemalda liin ${escapeHtml(line)}" aria-label="Eemalda liin ${escapeHtml(line)}">
         <i data-lucide="x"></i>
       </button>
@@ -6484,19 +6632,21 @@ function renderLineTags() {
 
 function updateLineColor(input) {
   const line = input.dataset.line;
+  const type = sanitizeTransportType(input.dataset.transportType || activeTransportType());
   const color = input.value;
   if (!line || !isHexColor(color)) {
     return;
   }
 
-  state.lineColors[line] = color;
+  state.lineColors[lineStateKey(line, type)] = color;
   saveLineColors();
-  syncLineColorControls(line, color);
+  syncLineColorControls(line, type, color);
   refreshColoredLayers(false);
 }
 
-function syncLineColorControls(line, color) {
-  document.querySelectorAll(`[data-line="${cssString(line)}"]`).forEach((element) => {
+function syncLineColorControls(line, type, color) {
+  const lineSelector = `[data-line="${cssString(line)}"][data-transport-type="${cssString(sanitizeTransportType(type))}"]`;
+  document.querySelectorAll(lineSelector).forEach((element) => {
     if (element.classList.contains('line-control-row')) {
       element.style.setProperty('--line-color', color);
     }
@@ -6526,34 +6676,37 @@ function syncLineColorControls(line, color) {
 
 function updateLineEmphasis(input) {
   const line = input.dataset.line;
+  const type = sanitizeTransportType(input.dataset.transportType || activeTransportType());
   if (!line) {
     return;
   }
 
   const emphasis = clampNumber(Number(input.value) / 100, 0, 1);
-  state.lineEmphasis[line] = emphasis;
+  state.lineEmphasis[lineStateKey(line, type)] = emphasis;
   saveLineEmphasis();
-  syncLineEmphasisControls(line, emphasis);
+  syncLineEmphasisControls(line, type, emphasis);
   refreshLineEmphasis();
 }
 
-function syncLineEmphasisControls(line, emphasis) {
+function syncLineEmphasisControls(line, type, emphasis) {
   const percent = `${Math.round(emphasis * 100)}%`;
-  document.querySelectorAll(`.line-control-row[data-line="${cssString(line)}"]`).forEach((element) => {
+  const lineSelector = `[data-line="${cssString(line)}"][data-transport-type="${cssString(sanitizeTransportType(type))}"]`;
+  document.querySelectorAll(`.line-control-row${lineSelector}`).forEach((element) => {
     element.style.setProperty('--line-emphasis', percent);
   });
-  document.querySelectorAll(`.line-emphasis-input[data-line="${cssString(line)}"]`).forEach((input) => {
+  document.querySelectorAll(`.line-emphasis-input${lineSelector}`).forEach((input) => {
     const value = Math.round(emphasis * 100);
     input.value = String(value);
-    applyLineSliderStyle(input, routeColor(line), value);
+    applyLineSliderStyle(input, routeColor(line, type), value);
   });
-  document.querySelectorAll(`.line-emphasis-value[data-line="${cssString(line)}"]`).forEach((element) => {
+  document.querySelectorAll(`.line-emphasis-value${lineSelector}`).forEach((element) => {
     element.textContent = percent;
   });
 }
 
 function applyLineSliderStyle(input, color, value) {
-  const sliderColor = isHexColor(color) ? color : routeColor(input.dataset.line || '');
+  const sliderType = sanitizeTransportType(input.dataset.transportType || activeTransportType());
+  const sliderColor = isHexColor(color) ? color : routeColor(input.dataset.line || '', sliderType);
   const percent = clampNumber(Number(value), 0, 100);
   const shell = input.closest('.line-slider-shell');
   shell?.setAttribute('style', lineSliderShellStyle(sliderColor, percent));
@@ -6759,6 +6912,22 @@ function loadTransportType() {
   }
 }
 
+function loadTramBusOverlay() {
+  try {
+    return localStorage.getItem(TRAM_BUS_OVERLAY_KEY) !== 'off';
+  } catch {
+    return true;
+  }
+}
+
+function saveTramBusOverlay() {
+  try {
+    localStorage.setItem(TRAM_BUS_OVERLAY_KEY, state.showBusesInTram ? 'on' : 'off');
+  } catch {
+    // The toggle still works for the current session if localStorage is blocked.
+  }
+}
+
 function loadLines(type = activeTransportType()) {
   const normalizedType = sanitizeTransportType(type);
   try {
@@ -6787,7 +6956,7 @@ function loadLineColors() {
   try {
     const stored = JSON.parse(localStorage.getItem('bussradar.lineColors') || '{}');
     if (stored && typeof stored === 'object') {
-      return Object.fromEntries(Object.entries(stored).filter(([, color]) => isHexColor(String(color))));
+      return sanitizeLineColors(stored);
     }
   } catch {
     return {};
@@ -6805,11 +6974,7 @@ function loadLineEmphasis() {
   try {
     const stored = JSON.parse(localStorage.getItem('bussradar.lineEmphasis') || '{}');
     if (stored && typeof stored === 'object') {
-      return Object.fromEntries(
-        Object.entries(stored)
-          .map(([line, value]) => [line, clampNumber(Number(value), 0, 1)])
-          .filter(([, value]) => Number.isFinite(value))
-      );
+      return sanitizeLineEmphasis(stored);
     }
   } catch {
     return {};
@@ -6857,13 +7022,18 @@ function uniqueSortedLines(lines) {
     .sort((a, b) => a.localeCompare(b, 'et', { numeric: true }));
 }
 
-function lineEmphasis(line) {
-  const value = state.lineEmphasis ? Number(state.lineEmphasis[String(line)]) : 1;
+function lineEmphasis(line, type = activeTransportType()) {
+  const key = lineStateKey(line, type);
+  const legacyKey = String(line);
+  const raw = state.lineEmphasis
+    ? state.lineEmphasis[key] ?? (sanitizeTransportType(type) === 'bus' ? state.lineEmphasis[legacyKey] : undefined)
+    : undefined;
+  const value = Number(raw);
   return clampNumber(Number.isFinite(value) && value >= 0 ? value : 1, 0, 1);
 }
 
-function lineMapOpacity(line) {
-  const emphasis = lineEmphasis(line);
+function lineMapOpacity(line, type = activeTransportType()) {
+  const emphasis = lineEmphasis(line, type);
   return emphasis <= 0 ? 0 : Math.pow(emphasis, 1.7);
 }
 
@@ -6964,11 +7134,17 @@ function loadTheme() {
 
 function routeColor(line, type = activeTransportType()) {
   const text = String(line);
-  if (state.lineColors && isHexColor(state.lineColors[text])) {
+  const normalizedType = sanitizeTransportType(type);
+  const key = lineStateKey(text, normalizedType);
+  if (state.lineColors && isHexColor(state.lineColors[key])) {
+    return state.lineColors[key];
+  }
+
+  if (normalizedType === 'bus' && state.lineColors && isHexColor(state.lineColors[text])) {
     return state.lineColors[text];
   }
 
-  if (sanitizeTransportType(type) === 'tram') {
+  if (normalizedType === 'tram') {
     const tramPreferred = {
       1: '#ea580c',
       2: '#c2410c',
@@ -7070,16 +7246,16 @@ function registerServiceWorker() {
   if ('serviceWorker' in navigator) {
     let reloadedForWorker = false;
     navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (reloadedForWorker || sessionStorage.getItem('bussradar.swReloaded') === '176') {
+      if (reloadedForWorker || sessionStorage.getItem('bussradar.swReloaded') === '180') {
         return;
       }
 
       reloadedForWorker = true;
-      sessionStorage.setItem('bussradar.swReloaded', '176');
+      sessionStorage.setItem('bussradar.swReloaded', '180');
       window.location.reload();
     });
 
-    navigator.serviceWorker.register('service-worker.js?v=176').then((registration) => {
+    navigator.serviceWorker.register('service-worker.js?v=180').then((registration) => {
       registration.update?.();
 
       if (registration.waiting) {
