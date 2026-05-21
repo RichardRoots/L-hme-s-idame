@@ -205,8 +205,18 @@ button {
   background: color-mix(in srgb, #f97316 13%, var(--panel));
 }
 
+.mode-toggle-button.is-train-next {
+  color: #1d4ed8;
+  border-color: color-mix(in srgb, #2563eb 46%, var(--line));
+  background: color-mix(in srgb, #2563eb 10%, var(--panel));
+}
+
 .mode-toggle-button.is-active svg {
   color: #ea580c;
+}
+
+.mode-toggle-button.is-train-next svg {
+  color: #2563eb;
 }
 
 .status-pill {
@@ -2008,6 +2018,7 @@ body.is-live-refreshing .status-pill {
   gap: 8px;
   padding: 10px;
   border: 1px solid color-mix(in srgb, var(--brand) 34%, var(--line));
+  border-left: 4px solid var(--brand);
   border-radius: 8px;
   background: color-mix(in srgb, var(--brand) 8%, var(--panel));
 }
@@ -2509,6 +2520,10 @@ body.is-live-refreshing .status-pill {
   background: var(--badge-color, #ea580c);
 }
 
+.route-badge.train {
+  background: var(--badge-color, #2563eb);
+}
+
 .legend-dot.tram {
   background: #ea580c;
 }
@@ -2625,17 +2640,21 @@ body.is-live-refreshing .status-pill {
 .vehicle-mode-symbol svg {
   width: 14px;
   height: 14px;
+  fill: none;
+  stroke: currentColor;
   stroke-width: 2.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .vehicle-marker.is-tram .vehicle-pin {
-  width: 42px;
+  width: 44px;
   height: 46px;
-  border-radius: 14px 14px 10px 10px;
+  border-radius: 15px 15px 11px 11px;
   border-color: #ffffff;
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--vehicle-color, #ea580c) 82%, #ffffff) 0%, var(--vehicle-color, #ea580c) 58%, color-mix(in srgb, var(--vehicle-color, #ea580c) 78%, #111827) 100%);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--vehicle-color, #ea580c) 18%, transparent), 0 8px 18px rgba(18, 34, 31, 0.26);
+    linear-gradient(180deg, color-mix(in srgb, var(--vehicle-color, #ea580c) 72%, #ffffff) 0%, var(--vehicle-color, #ea580c) 48%, color-mix(in srgb, var(--vehicle-color, #ea580c) 76%, #111827) 100%);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--vehicle-color, #ea580c) 22%, transparent), 0 9px 20px rgba(18, 34, 31, 0.28);
 }
 
 .vehicle-marker.is-tram .vehicle-pulse {
@@ -2646,13 +2665,12 @@ body.is-live-refreshing .status-pill {
 
 .vehicle-marker.is-tram .vehicle-pin::before {
   inset: auto;
-  left: 7px;
-  right: 7px;
+  left: 8px;
+  right: 8px;
   top: 6px;
-  height: 14px;
-  border-radius: 7px 7px 4px 4px;
-  background:
-    linear-gradient(90deg, rgba(255, 255, 255, 0.92) 0 44%, rgba(255, 255, 255, 0.42) 44% 56%, rgba(255, 255, 255, 0.92) 56% 100%);
+  height: 16px;
+  border-radius: 8px 8px 5px 5px;
+  background: rgba(255, 255, 255, 0.94);
   box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.58), 0 1px 2px rgba(18, 34, 31, 0.12);
 }
 
@@ -2684,16 +2702,34 @@ body.is-live-refreshing .status-pill {
 }
 
 .vehicle-marker.is-tram .vehicle-mode-symbol {
-  display: none;
+  top: 7px;
+  bottom: auto;
+  z-index: 4;
+  width: 24px;
+  height: 15px;
+  border-radius: 6px;
+  color: var(--vehicle-color, #ea580c);
+  background: transparent;
+  box-shadow: none;
+}
+
+.vehicle-marker.is-tram .vehicle-mode-symbol svg {
+  width: 18px;
+  height: 14px;
+  stroke-width: 2.55;
 }
 
 .vehicle-marker.is-tram .vehicle-pin strong {
   position: absolute;
   left: 50%;
-  top: 24px;
+  top: 26px;
   transform: translateX(-50%);
-  max-width: 34px;
-  font-size: 0.92rem;
+  max-width: 35px;
+  min-width: 21px;
+  padding: 1px 5px 2px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  font-size: 0.9rem;
   letter-spacing: 0;
   text-shadow: 0 1px 2px rgba(18, 34, 31, 0.4);
 }
@@ -4195,6 +4231,12 @@ body.is-live-refreshing .status-pill {
   background: color-mix(in srgb, #f97316 15%, var(--panel));
 }
 
+:root[data-theme="dark"] .mode-toggle-button.is-train-next {
+  color: #bfdbfe;
+  border-color: color-mix(in srgb, #3b82f6 48%, var(--line));
+  background: color-mix(in srgb, #3b82f6 13%, var(--panel));
+}
+
 :root[data-theme="dark"] .schedule-panel-card,
 :root[data-theme="dark"] .panel-block,
 :root[data-theme="dark"] .auth-card {
@@ -5015,7 +5057,7 @@ body.is-live-refreshing .status-pill {
   }
 
   .vehicle-marker.is-tram .vehicle-pin {
-    width: 38px;
+    width: 40px;
     height: 42px;
     border-width: 2.5px;
     border-radius: 13px 13px 9px 9px;
@@ -5034,10 +5076,21 @@ body.is-live-refreshing .status-pill {
     bottom: 7px;
   }
 
+  .vehicle-marker.is-tram .vehicle-mode-symbol {
+    top: 6px;
+    width: 22px;
+    height: 13px;
+  }
+
+  .vehicle-marker.is-tram .vehicle-mode-symbol svg {
+    width: 16px;
+    height: 12px;
+  }
+
   .vehicle-marker.is-tram .vehicle-pin strong {
-    top: 22px;
+    top: 24px;
     transform: translateX(-50%);
-    font-size: 0.84rem;
+    font-size: 0.82rem;
   }
 
   .line-emphasis-value {

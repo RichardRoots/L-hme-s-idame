@@ -3,8 +3,10 @@ $ErrorActionPreference = "Stop"
 $DataBase = "https://transport.tallinn.ee"
 $LiveDir = Join-Path $PSScriptRoot "..\data\live"
 $ShapesDir = Join-Path $LiveDir "shapes"
+$TramShapesDir = Join-Path $ShapesDir "tram"
 
 New-Item -ItemType Directory -Force -Path $ShapesDir | Out-Null
+New-Item -ItemType Directory -Force -Path $TramShapesDir | Out-Null
 
 function Save-TransitText {
     param(
@@ -38,7 +40,10 @@ function Clean-Text {
 }
 
 function Get-RouteLines {
-    param([Parameter(Mandatory = $true)][string]$RoutesText)
+    param(
+        [Parameter(Mandatory = $true)][string]$RoutesText,
+        [Parameter(Mandatory = $true)][string]$WantedTransport
+    )
 
     $lines = [System.Collections.Generic.HashSet[string]]::new()
     $currentLine = ""
@@ -70,7 +75,8 @@ function Get-RouteLines {
         }
 
         $routeStops = Clean-Text $row[13]
-        if ($currentLine -ne "" -and ($currentTransport -eq "" -or $currentTransport -eq "bus") -and $routeStops -ne "") {
+        $matchesTransport = $currentTransport -eq $WantedTransport -or ($WantedTransport -eq "bus" -and $currentTransport -eq "")
+        if ($currentLine -ne "" -and $matchesTransport -and $routeStops -ne "") {
             [void]$lines.Add($currentLine)
         }
     }
@@ -82,16 +88,22 @@ $gps = Save-TransitText -Uri "$DataBase/gps.txt" -Path (Join-Path $LiveDir "gps.
 $stops = Save-TransitText -Uri "$DataBase/data/stops.txt" -Path (Join-Path $LiveDir "stops.txt")
 $routes = Save-TransitText -Uri "$DataBase/data/routes.txt" -Path (Join-Path $LiveDir "routes.txt")
 
-$shapeLines = @()
-foreach ($line in Get-RouteLines $routes) {
-    $shapeUri = "$DataBase/data/tallinna-linn_bus_$([uri]::EscapeDataString($line)).txt"
-    $shapePath = Join-Path $ShapesDir "$line.txt"
+$shapeLines = @{
+    bus = @()
+    tram = @()
+}
 
-    try {
-        [void](Save-TransitText -Uri $shapeUri -Path $shapePath)
-        $shapeLines += $line
-    } catch {
-        Write-Warning "Shape $line skipped: $($_.Exception.Message)"
+foreach ($type in @("bus", "tram")) {
+    foreach ($line in Get-RouteLines -RoutesText $routes -WantedTransport $type) {
+        $shapeUri = "$DataBase/data/tallinna-linn_${type}_$([uri]::EscapeDataString($line)).txt"
+        $shapePath = if ($type -eq "tram") { Join-Path $TramShapesDir "$line.txt" } else { Join-Path $ShapesDir "$line.txt" }
+
+        try {
+            [void](Save-TransitText -Uri $shapeUri -Path $shapePath)
+            $shapeLines[$type] += $line
+        } catch {
+            Write-Warning "$type shape $line skipped: $($_.Exception.Message)"
+        }
     }
 }
 
@@ -101,8 +113,9 @@ $manifest = [ordered]@{
     vehiclesBytes = $gps.Length
     stopsBytes = $stops.Length
     routesBytes = $routes.Length
-    shapeLines = $shapeLines
+    shapeLines = $shapeLines.bus
+    tramShapeLines = $shapeLines.tram
 } | ConvertTo-Json -Depth 4
 
 [System.IO.File]::WriteAllText((Resolve-FullPath (Join-Path $LiveDir "manifest.json")), $manifest, [System.Text.Encoding]::UTF8)
-Write-Host "Updated transit mirror: $($shapeLines.Count) route shape files."
+Write-Host "Updated transit mirror: $($shapeLines.bus.Count) bus and $($shapeLines.tram.Count) tram shape files."

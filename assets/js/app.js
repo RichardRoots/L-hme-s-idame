@@ -3,6 +3,7 @@ const DEFAULT_LINES = ['18', '40', '60'];
 const DEFAULT_LINES_BY_TYPE = {
   bus: DEFAULT_LINES,
   tram: ['1', '2', '3', '4', '5'],
+  train: [],
 };
 const DEFAULT_STOP = { id: '1297', name: 'Laikmaa', lat: 59.43614, lon: 24.75755 };
 const REFRESH_SECONDS = 10;
@@ -24,9 +25,6 @@ const ROUTE_SIDE_STYLES = {
 const ROUTE_MAX_POINT_JUMP_METERS = 1100;
 const ROUTE_SIDE_OFFSET_PX = 7;
 const ROUTE_SIDE_CENTER_EPS_PX = 18;
-const ROUTE_OVERLAP_DISTANCE_PX = 72;
-const ROUTE_SEGMENT_HEADING_TOLERANCE = 26;
-const ROUTE_DETAIL_ZOOM = 99;
 const MAP_STOP_VISIBLE_ZOOM = 12;
 const MAP_STOP_FULL_ZOOM = 14;
 const MAP_STOP_FALLBACK_COLOR = '#063f3d';
@@ -39,6 +37,7 @@ const state = {
   vehicleLayer: null,
   schoolLayer: null,
   stopLayer: null,
+  scheduleRouteHighlightLayer: null,
   scheduleStopHighlightLayer: null,
   transferStopLayer: null,
   favoriteStopLayer: null,
@@ -211,6 +210,7 @@ function createMap() {
   state.map.createPane('schoolPane');
   state.map.createPane('mapStopPane');
   state.map.createPane('stopPane');
+  state.map.createPane('scheduleRoutePane');
   state.map.createPane('scheduleStopPane');
   state.map.createPane('transferStopPane');
   state.map.createPane('favoriteStopPane');
@@ -219,6 +219,7 @@ function createMap() {
   state.map.getPane('schoolPane').style.zIndex = 410;
   state.map.getPane('mapStopPane').style.zIndex = 500;
   state.map.getPane('stopPane').style.zIndex = 520;
+  state.map.getPane('scheduleRoutePane').style.zIndex = 570;
   state.map.getPane('scheduleStopPane').style.zIndex = 585;
   state.map.getPane('transferStopPane').style.zIndex = 595;
   state.map.getPane('favoriteStopPane').style.zIndex = 560;
@@ -228,6 +229,7 @@ function createMap() {
   state.schoolLayer = L.layerGroup().addTo(state.map);
   state.mapStopLayer = L.layerGroup().addTo(state.map);
   state.stopLayer = L.layerGroup().addTo(state.map);
+  state.scheduleRouteHighlightLayer = L.layerGroup().addTo(state.map);
   state.scheduleStopHighlightLayer = L.layerGroup().addTo(state.map);
   state.transferStopLayer = L.layerGroup().addTo(state.map);
   state.favoriteStopLayer = L.layerGroup().addTo(state.map);
@@ -252,6 +254,10 @@ function updateMapDensity() {
 }
 
 function sanitizeTransportType(type) {
+  if (type === 'train') {
+    return 'train';
+  }
+
   return type === 'tram' ? 'tram' : 'bus';
 }
 
@@ -260,6 +266,10 @@ function activeTransportType() {
 }
 
 function visibleTransportTypes() {
+  if (activeTransportType() === 'train') {
+    return ['train'];
+  }
+
   if (activeTransportType() !== 'tram') {
     return ['bus'];
   }
@@ -285,39 +295,49 @@ function visibleLineConfigs() {
 
 function transportMapOpacity(type = activeTransportType()) {
   const normalizedType = sanitizeTransportType(type);
-  return activeTransportType() === 'tram' && normalizedType === 'bus' ? 0.32 : 1;
+  return activeTransportType() === 'tram' && normalizedType === 'bus' ? 0.52 : 1;
 }
 
 function transportLabel(type = activeTransportType()) {
-  return sanitizeTransportType(type) === 'tram' ? 'tramm' : 'buss';
+  const normalizedType = sanitizeTransportType(type);
+  if (normalizedType === 'train') return 'rong';
+  return normalizedType === 'tram' ? 'tramm' : 'buss';
 }
 
 function transportPluralLabel(type = activeTransportType()) {
-  return sanitizeTransportType(type) === 'tram' ? 'tramme' : 'busse';
+  const normalizedType = sanitizeTransportType(type);
+  if (normalizedType === 'train') return 'ronge';
+  return normalizedType === 'tram' ? 'tramme' : 'busse';
 }
 
 function transportPluralNominativeLabel(type = activeTransportType()) {
-  return sanitizeTransportType(type) === 'tram' ? 'trammid' : 'bussid';
+  const normalizedType = sanitizeTransportType(type);
+  if (normalizedType === 'train') return 'rongid';
+  return normalizedType === 'tram' ? 'trammid' : 'bussid';
 }
 
 function transportPluralGenitiveLabel(type = activeTransportType()) {
-  return sanitizeTransportType(type) === 'tram' ? 'trammide' : 'busside';
+  const normalizedType = sanitizeTransportType(type);
+  if (normalizedType === 'train') return 'rongide';
+  return normalizedType === 'tram' ? 'trammide' : 'busside';
 }
 
 function transportTitleLabel(type = activeTransportType()) {
-  return sanitizeTransportType(type) === 'tram' ? 'Tramm' : 'Buss';
+  const normalizedType = sanitizeTransportType(type);
+  if (normalizedType === 'train') return 'Rong';
+  return normalizedType === 'tram' ? 'Tramm' : 'Buss';
 }
 
 function transportLineLabel(type = activeTransportType()) {
-  return sanitizeTransportType(type) === 'tram' ? 'Trammiliin' : 'Bussiliin';
+  const normalizedType = sanitizeTransportType(type);
+  if (normalizedType === 'train') return 'Rongiliin';
+  return normalizedType === 'tram' ? 'Trammiliin' : 'Bussiliin';
 }
 
 function transportPanelTitle(type = activeTransportType()) {
-  return sanitizeTransportType(type) === 'tram' ? 'Valitud trammid' : 'Valitud bussid';
-}
-
-function transportIconName(type = activeTransportType()) {
-  return sanitizeTransportType(type) === 'tram' ? 'tram-front' : 'bus-front';
+  const normalizedType = sanitizeTransportType(type);
+  if (normalizedType === 'train') return 'Rongid';
+  return normalizedType === 'tram' ? 'Valitud trammid' : 'Valitud bussid';
 }
 
 function vehicleTransportType(vehicle) {
@@ -329,7 +349,9 @@ function routeTransportType(route) {
 }
 
 function routeBadgeModeClass(type = activeTransportType()) {
-  return sanitizeTransportType(type) === 'tram' ? ' tram' : '';
+  const normalizedType = sanitizeTransportType(type);
+  if (normalizedType === 'train') return ' train';
+  return normalizedType === 'tram' ? ' tram' : '';
 }
 
 function departureTransportType(departure) {
@@ -347,19 +369,23 @@ function lineStateKey(line, type = activeTransportType()) {
 function updateTransportUi() {
   const type = activeTransportType();
   const tram = type === 'tram';
+  const train = type === 'train';
   document.body?.classList.toggle('transport-tram', tram);
-  document.body?.classList.toggle('transport-bus', !tram);
+  document.body?.classList.toggle('transport-train', train);
+  document.body?.classList.toggle('transport-bus', type === 'bus');
 
   if (els.transportModeToggle) {
-    const title = tram ? 'Lülita trammid välja' : 'Lülita trammid sisse';
-    els.transportModeToggle.classList.toggle('is-active', tram);
-    els.transportModeToggle.setAttribute('aria-pressed', tram ? 'true' : 'false');
+    const nextType = nextTransportType();
+    const title = `Lülita ${transportPluralNominativeLabel(nextType)} sisse`;
+    els.transportModeToggle.classList.toggle('is-active', type !== 'bus');
+    els.transportModeToggle.classList.toggle('is-train-next', nextType === 'train');
+    els.transportModeToggle.setAttribute('aria-pressed', type !== 'bus' ? 'true' : 'false');
     els.transportModeToggle.setAttribute('aria-label', title);
     els.transportModeToggle.title = title;
-    els.transportModeToggle.querySelector('i')?.setAttribute('data-lucide', 'tram-front');
+    els.transportModeToggle.querySelector('i')?.setAttribute('data-lucide', nextType === 'train' ? 'train-front' : nextType === 'tram' ? 'tram-front' : 'bus-front');
   }
   if (els.transportModeText) {
-    els.transportModeText.textContent = 'Trammid';
+    els.transportModeText.textContent = transportPluralNominativeLabel(nextTransportType()).replace(/^./, (letter) => letter.toUpperCase());
   }
   if (els.vehiclePanelTitle) {
     els.vehiclePanelTitle.textContent = transportPanelTitle(type);
@@ -368,7 +394,8 @@ function updateTransportUi() {
     els.lineLabel.textContent = transportLineLabel(type);
   }
   if (els.lineInput) {
-    els.lineInput.placeholder = tram ? 'nt 1' : 'nt 18';
+    els.lineInput.placeholder = train ? 'Rongid tulevad peatuse tabloos' : tram ? 'nt 1' : 'nt 18';
+    els.lineInput.disabled = train;
   }
   if (els.tramBusOverlayToggle) {
     const busesVisible = Boolean(state.showBusesInTram);
@@ -436,6 +463,8 @@ function setTransportType(type) {
   state.vehicleLayer?.clearLayers();
   state.routeLayer?.clearLayers();
   state.mapStopLayer?.clearLayers();
+  state.scheduleRouteHighlightLayer?.clearLayers();
+  state.scheduleStopHighlightLayer?.clearLayers();
   state.vehicleMarkers.clear();
   state.mapStopMarkers.clear();
   fetchScheduleLines();
@@ -736,7 +765,7 @@ function bindEvents() {
   });
 
   els.transportModeToggle?.addEventListener('click', () => {
-    setTransportType(activeTransportType() === 'tram' ? 'bus' : 'tram');
+    setTransportType(nextTransportType());
   });
 
   els.tramBusOverlayToggle?.addEventListener('click', () => {
@@ -761,6 +790,12 @@ function bindEvents() {
 
   els.lineForm.addEventListener('submit', (event) => {
     event.preventDefault();
+    if (activeTransportType() === 'train') {
+      setStatus('Rongid vali peatuse tabloost', false);
+      els.stopSearch?.focus();
+      return;
+    }
+
     const value = normalizeLine(els.lineInput.value);
     if (!value) return;
 
@@ -1217,6 +1252,14 @@ function startRefreshLoop() {
 }
 
 async function fetchVehicles() {
+  if (activeTransportType() === 'train') {
+    state.vehicles = [];
+    renderVehicles();
+    renderDelayPanel();
+    setStatus('Rongide GPS puudub', false);
+    return;
+  }
+
   const configs = visibleLineConfigs();
   if (configs.length === 0) {
     state.vehicles = [];
@@ -1434,14 +1477,54 @@ function isStopCoordinate(stop) {
     && lon >= 24.35 && lon <= 25.25;
 }
 
-async function loadMapStops() {
+async function loadMapStops(type = activeTransportType()) {
   try {
-    const data = await fetchJson('api.html?action=mapStops');
+    const params = new URLSearchParams({ action: 'mapStops', type });
+    const data = await fetchJson(`api.html?${params.toString()}`);
     state.mapStops = data.stops || [];
     renderMapStops();
+    selectNearbyTrainStopIfNeeded(type);
   } catch (error) {
     setStatus('Peatused puuduvad', false);
   }
+}
+
+function selectNearbyTrainStopIfNeeded(type) {
+  if (sanitizeTransportType(type) !== 'train' || state.mapStops.length === 0) {
+    return;
+  }
+
+  const selected = state.selectedStop;
+  const alreadyTrainStop = state.mapStops.some((stop) => stopsRepresentSamePlace(stop, selected));
+  if (alreadyTrainStop) {
+    return;
+  }
+
+  const reference = isStopCoordinate(selected) ? selected : { lat: TALLINN_CENTER[0], lon: TALLINN_CENTER[1] };
+  const nearest = state.mapStops
+    .map((stop) => ({
+      stop,
+      distance: distanceMeters(reference.lat, reference.lon, stop.lat, stop.lon),
+    }))
+    .sort((a, b) => a.distance - b.distance)[0]?.stop;
+
+  if (nearest) {
+    selectStop(nearest);
+  }
+}
+
+function stopsRepresentSamePlace(first, second) {
+  if (!first || !second) {
+    return false;
+  }
+
+  const firstIds = [first.id, first.stopId, first.siriId].filter(Boolean).map(String);
+  const secondIds = [second.id, second.stopId, second.siriId].filter(Boolean).map(String);
+  if (firstIds.some((id) => secondIds.includes(id))) {
+    return true;
+  }
+
+  return distanceMeters(first.lat, first.lon, second.lat, second.lon) <= 35;
 }
 
 function renderMapStops() {
@@ -1561,7 +1644,7 @@ async function searchFavoriteStops() {
   }
 
   els.favoriteStopResults.innerHTML = '<div class="empty-state">Otsin...</div>';
-  const params = new URLSearchParams({ action: 'stops', q: query });
+  const params = new URLSearchParams({ action: 'stops', q: query, type: activeTransportType() });
 
   try {
     const data = await fetchJson(`api.html?${params.toString()}`);
@@ -1957,7 +2040,7 @@ async function searchTransferStops() {
   }
 
   els.transferStopResults.innerHTML = '<div class="empty-state">Otsin...</div>';
-  const params = new URLSearchParams({ action: 'stops', q: query });
+  const params = new URLSearchParams({ action: 'stops', q: query, type: activeTransportType() });
 
   try {
     const data = await fetchJson(`api.html?${params.toString()}`);
@@ -2124,8 +2207,8 @@ function onboardingSteps() {
     {
       selector: '#transportModeToggle',
       icon: 'tram-front',
-      title: 'Bussid ja trammid',
-      body: 'Lülitab kaardi bussi- ja trammirežiimi vahel. Režiim vahetab ka liinid, sõiduplaani, markerid ja ümberistumise arvutuse.',
+      title: 'Bussid, trammid ja rongid',
+      body: 'Vahetab kaardi bussi-, trammi- ja rongivaate vahel. Režiim vahetab ka liinid, sõiduplaani, markerid ja ümberistumise arvutuse.',
     },
     {
       selector: '#scheduleToggle',
@@ -3858,6 +3941,12 @@ async function fetchRoutes() {
   state.routeLayer.clearLayers();
   state.routes = [];
 
+  if (activeTransportType() === 'train') {
+    clearScheduleRouteHighlight();
+    await loadMapStops('train');
+    return;
+  }
+
   const configs = visibleLineConfigs();
   if (configs.length === 0) {
     state.mapStops = [];
@@ -3879,6 +3968,7 @@ async function fetchRoutes() {
     state.routes = groups.flat();
     renderRoutes();
     renderRouteStops();
+    refreshScheduleRouteHighlight();
     if (state.schools.length > 0) {
       renderSchools();
     }
@@ -3893,7 +3983,7 @@ function renderRoutes() {
   state.routeLayer.clearLayers();
 
   const drawableRoutes = state.routes
-    .filter((route) => route.shapeQuality !== 'stops-only')
+    .filter(routeCanDraw)
     .filter((route) => Array.isArray(route.points) && route.points.length >= 2)
     .filter((route) => lineMapOpacity(route.line, routeTransportType(route)) * transportMapOpacity(routeTransportType(route)) > 0);
   const styledRoutes = drawableRoutes
@@ -3901,21 +3991,22 @@ function renderRoutes() {
     .sort((a, b) => a.style.priority - b.style.priority
       || String(a.route.line).localeCompare(String(b.route.line), 'et', { numeric: true }));
 
-  if (!shouldRenderDetailedRoutes()) {
-    renderOverviewRoutes(styledRoutes);
-    return;
-  }
-
-  const routeSegments = routeDrawingSegments(styledRoutes);
-  const routeRuns = routeDrawingRuns(routeSegments);
-
-  routeRuns.forEach((run) => {
-    renderRouteRun(run);
-  });
+  renderOverviewRoutes(styledRoutes);
 }
 
-function shouldRenderDetailedRoutes() {
-  return state.map && state.map.getZoom() >= ROUTE_DETAIL_ZOOM;
+function nextTransportType() {
+  const type = activeTransportType();
+  if (type === 'bus') return 'tram';
+  if (type === 'tram') return 'train';
+  return 'bus';
+}
+
+function routeCanDraw(route) {
+  if (route.shapeQuality === 'stops-only') {
+    return false;
+  }
+
+  return routeTransportType(route) !== 'tram' || route.shapeQuality === 'road-shape';
 }
 
 function renderOverviewRoutes(styledRoutes) {
@@ -3929,7 +4020,7 @@ function renderOverviewRoutes(styledRoutes) {
     const emphasis = lineMapOpacity(route.line, routeTransportType(route)) * transportMapOpacity(routeTransportType(route));
     const dark = state.theme === 'dark';
     const tram = routeTransportType(route) === 'tram';
-    const mainDash = tram ? null : style.dashArray;
+    const mainDash = style.dashArray;
     const mainWeight = style.weight + (dark ? 1 : 0);
 
     L.polyline(segments, {
@@ -3988,165 +4079,6 @@ function routeNeedsOverviewSideOffset(route, styledRoutes) {
       && routeDirectionIndex(entry.route) % 2 !== routeDirectionIndex(route) % 2
       && layerPointDistance(routeCenter, routeScreenCenter(entry.route)) <= ROUTE_SIDE_CENTER_EPS_PX;
   });
-}
-
-function renderRouteRun(run) {
-  const { pattern, points, style } = run;
-  const dark = state.theme === 'dark';
-  if (!pattern.isAlternating) {
-    L.polyline(points, {
-      pane: 'routePane',
-      color: routeGapColor(),
-      weight: style.weight + (dark ? 6 : 4),
-      opacity: dark ? (style.dashArray ? 0.78 : 0.64) : (style.dashArray ? 0.7 : 0.58),
-      lineCap: 'round',
-      lineJoin: 'round',
-      dashArray: pattern.dashArray,
-      dashOffset: pattern.dashOffset,
-      smoothFactor: 0,
-      interactive: false,
-    }).addTo(state.routeLayer);
-  }
-
-  const line = L.polyline(points, {
-    pane: 'routePane',
-    color: run.color,
-    weight: style.weight + (dark ? 1 : 0),
-    opacity: Math.min(1, run.opacity * (dark ? 1.08 : 1)),
-    lineCap: pattern.lineCap,
-    lineJoin: 'round',
-    dashArray: pattern.dashArray,
-    dashOffset: pattern.dashOffset,
-    smoothFactor: 0,
-  }).addTo(state.routeLayer);
-
-  const tooltipParts = [
-    `Liin ${escapeHtml(run.line)}`,
-    escapeHtml(style.label),
-    run.route.name ? escapeHtml(run.route.name) : '',
-  ];
-
-  line.bindTooltip(tooltipParts.filter(Boolean).join(' · '), {
-    sticky: true,
-    opacity: 0.95,
-  });
-}
-
-function routeDrawingSegments(styledRoutes) {
-  const segments = [];
-
-  styledRoutes.forEach(({ route, style }) => {
-    routeLineSegments(route.points).forEach((routeSegment) => {
-      for (let index = 1; index < routeSegment.length; index += 1) {
-        const start = normalizeLatLon(routeSegment[index - 1]);
-        const end = normalizeLatLon(routeSegment[index]);
-        if (!start || !end || distanceMeters(start[0], start[1], end[0], end[1]) < 8) {
-          continue;
-        }
-
-        segments.push({
-          route,
-          style,
-          line: String(route.line),
-          lineKey: lineStateKey(route.line, routeTransportType(route)),
-          points: [start, end],
-          color: routeColor(route.line, routeTransportType(route)),
-          opacity: 0.98 * lineMapOpacity(route.line, routeTransportType(route)) * transportMapOpacity(routeTransportType(route)),
-          direction: routeDirectionIndex(route) % 2,
-          heading: routeSegmentHeadingDegrees(start, end),
-          midpoint: routeSegmentMidpoint(start, end),
-        });
-      }
-    });
-  });
-
-  return segments;
-}
-
-function routeDrawingRuns(routeSegments) {
-  const prepared = routeSegments.map((segment) => {
-    const pattern = routeSegmentPattern(segment, routeSegments);
-    const offset = routeSegmentNeedsSideOffset(segment, routeSegments);
-    const points = offset ? offsetRoutePoints(segment.points, segment.style.mapSide) : segment.points;
-    return {
-      ...segment,
-      points,
-      pattern,
-      patternKey: routePatternKey(pattern),
-      offset,
-    };
-  });
-
-  const runs = [];
-  let current = null;
-
-  prepared.forEach((segment) => {
-  if (current && canExtendRouteRun(current, segment)) {
-      current.points.push(segment.points[1]);
-      return;
-    }
-
-    if (current) {
-      runs.push(current);
-    }
-
-    current = {
-      route: segment.route,
-      style: segment.style,
-      line: segment.line,
-      lineKey: segment.lineKey,
-      color: segment.color,
-      opacity: segment.opacity,
-      pattern: segment.pattern,
-      patternKey: segment.patternKey,
-      offset: segment.offset,
-      points: [...segment.points],
-    };
-  });
-
-  if (current) {
-    runs.push(current);
-  }
-
-  return runs;
-}
-
-function canExtendRouteRun(run, segment) {
-  if (run.route !== segment.route
-    || run.line !== segment.line
-    || run.lineKey !== segment.lineKey
-    || run.style.mapSide !== segment.style.mapSide
-    || run.patternKey !== segment.patternKey
-    || run.offset !== segment.offset) {
-    return false;
-  }
-
-  const last = run.points[run.points.length - 1];
-  const next = segment.points[0];
-  return routePointsTouch(last, next);
-}
-
-function routePatternKey(pattern) {
-  return [
-    pattern.dashArray || '',
-    pattern.dashOffset || '',
-    pattern.lineCap || '',
-    pattern.isAlternating ? 'alt' : 'single',
-  ].join('|');
-}
-
-function routePointsTouch(pointA, pointB) {
-  if (!pointA || !pointB) {
-    return false;
-  }
-
-  if (state.map) {
-    const layerA = state.map.latLngToLayerPoint(L.latLng(pointA[0], pointA[1]));
-    const layerB = state.map.latLngToLayerPoint(L.latLng(pointB[0], pointB[1]));
-    return layerPointDistance(layerA, layerB) <= 8;
-  }
-
-  return distanceMeters(pointA[0], pointA[1], pointB[0], pointB[1]) < 20;
 }
 
 function routeLineSegments(points) {
@@ -4221,62 +4153,6 @@ function closestOppositeRoute(route, routes) {
   });
 
   return best;
-}
-
-function routeSegmentPattern(segment, allSegments) {
-  const peerLines = routeSegmentPeerLines(segment, allSegments);
-  const lineIndex = Math.max(0, peerLines.indexOf(segment.line));
-  const count = Math.max(1, peerLines.length);
-  const isAlternating = count > 1;
-
-  if (segment.style.dashArray) {
-    const step = 13;
-    return isAlternating
-      ? { dashArray: `1 ${Math.max(1, step * count - 1)}`, dashOffset: String(-(lineIndex * step)), lineCap: 'round', isAlternating }
-      : { dashArray: segment.style.dashArray, dashOffset: segment.style.dashOffset, lineCap: 'round', isAlternating };
-  }
-
-  if (isAlternating) {
-    const dash = segment.style.sharedDash || 58;
-    return {
-      dashArray: `${dash} ${Math.max(1, dash * (count - 1))}`,
-      dashOffset: String(-(lineIndex * dash)),
-      lineCap: 'butt',
-      isAlternating,
-    };
-  }
-
-  return { dashArray: null, dashOffset: '0', lineCap: 'round', isAlternating };
-}
-
-function routeSegmentPeerLines(segment, allSegments) {
-  const lines = new Set([segment.lineKey || segment.line]);
-
-  allSegments.forEach((other) => {
-    if (other === segment || other.style.mapSide !== segment.style.mapSide) {
-      return;
-    }
-
-    if (routeHeadingDifference(segment.heading, other.heading) > ROUTE_SEGMENT_HEADING_TOLERANCE) {
-      return;
-    }
-
-    if (layerPointDistance(segment.midpoint, other.midpoint) <= ROUTE_OVERLAP_DISTANCE_PX) {
-      lines.add(other.lineKey || other.line);
-    }
-  });
-
-  return [...lines].sort((a, b) => a.localeCompare(b, 'et', { numeric: true }));
-}
-
-function routeSegmentNeedsSideOffset(segment, allSegments) {
-  return allSegments.some((other) => {
-    return other !== segment
-      && (other.lineKey || other.line) === (segment.lineKey || segment.line)
-      && other.direction !== segment.direction
-      && routeHeadingDifference(segment.heading, other.heading) <= ROUTE_SEGMENT_HEADING_TOLERANCE
-      && layerPointDistance(segment.midpoint, other.midpoint) <= ROUTE_SIDE_CENTER_EPS_PX;
-  });
 }
 
 function offsetRouteSegments(segments, mapSide) {
@@ -4369,16 +4245,6 @@ function routeScreenCenter(route) {
   return count ? L.point(x / count, y / count) : L.point(0, 0);
 }
 
-function routeSegmentMidpoint(start, end) {
-  const lat = (start[0] + end[0]) / 2;
-  const lon = (start[1] + end[1]) / 2;
-  if (state.map) {
-    return state.map.latLngToLayerPoint(L.latLng(lat, lon));
-  }
-
-  return L.point(lon * 100000, lat * -100000);
-}
-
 function routeOverallHeading(route) {
   const points = Array.isArray(route.points) ? route.points : [];
   const start = points.find(normalizeLatLon);
@@ -4402,11 +4268,6 @@ function routeSegmentHeadingDegrees(start, end) {
   const dx = (end[1] - start[1]) * lonMeters;
   const dy = (end[0] - start[0]) * 111320;
   return (Math.atan2(dy, dx) * 180 / Math.PI + 360) % 180;
-}
-
-function routeHeadingDifference(a, b) {
-  const diff = Math.abs(Number(a) - Number(b)) % 180;
-  return Math.min(diff, 180 - diff);
 }
 
 function layerPointDistance(pointA, pointB) {
@@ -4487,6 +4348,7 @@ function vehicleIcon(vehicle, risk) {
   const destination = shortText(vehicle.destination || '', 12);
   const color = routeColor(vehicle.line, transportType);
   const bearing = Number.isFinite(Number(vehicle.bearing)) ? Number(vehicle.bearing) : 0;
+  const modeSymbol = vehicleModeSymbolHtml(transportType);
   return L.divIcon({
     className: `vehicle-marker ${transportClass} ${riskClass} ${typeClass}`,
     html: `
@@ -4494,7 +4356,7 @@ function vehicleIcon(vehicle, risk) {
         <div class="vehicle-pin" style="--vehicle-color: ${color}; --bearing: ${bearing}deg;">
           <span class="vehicle-pulse" aria-hidden="true"></span>
           <span class="vehicle-arrow" aria-hidden="true"><i></i></span>
-          <span class="vehicle-mode-symbol" aria-hidden="true"><i data-lucide="${transportIconName(transportType)}"></i></span>
+          <span class="vehicle-mode-symbol" aria-hidden="true">${modeSymbol}</span>
           <strong>${escapeHtml(vehicle.line)}</strong>
           ${riskBadge}
         </div>
@@ -4508,6 +4370,19 @@ function vehicleIcon(vehicle, risk) {
   });
 }
 
+function vehicleModeSymbolHtml(type = activeTransportType()) {
+  const normalizedType = sanitizeTransportType(type);
+  if (normalizedType === 'train') {
+    return '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="14" rx="3"></rect><path d="M8 17l-2 4"></path><path d="M16 17l2 4"></path><path d="M8 8h8"></path><path d="M8 12h8"></path></svg>';
+  }
+
+  if (normalizedType === 'tram') {
+    return '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="3" width="12" height="13" rx="3"></rect><path d="M9 16l-2 4"></path><path d="M15 16l2 4"></path><path d="M9 8h6"></path><path d="M9 12h.01"></path><path d="M15 12h.01"></path></svg>';
+  }
+
+  return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 17h12"></path><path d="M6 17v2"></path><path d="M18 17v2"></path><rect x="5" y="4" width="14" height="13" rx="3"></rect><path d="M8 9h8"></path><path d="M8 13h.01"></path><path d="M16 13h.01"></path></svg>';
+}
+
 function renderVehicleList() {
   if (!els.vehicleList) {
     return;
@@ -4516,7 +4391,10 @@ function renderVehicleList() {
   const visibleVehicles = state.vehicles.filter((vehicle) => vehicleTransportType(vehicle) === activeTransportType());
 
   if (visibleVehicles.length === 0) {
-    els.vehicleList.innerHTML = `<div class="empty-state">Selle liini ${transportLabel()}i ei leitud</div>`;
+    const message = activeTransportType() === 'train'
+      ? 'Rongide reaalaja GPS ei ole saadaval'
+      : `Selle liini ${transportLabel()}i ei leitud`;
+    els.vehicleList.innerHTML = `<div class="empty-state">${escapeHtml(message)}</div>`;
     return;
   }
 
@@ -4643,7 +4521,7 @@ function stopPopupContent(stop, departures, loading = false, error = '') {
         : `${departure.minutesUntil} min`;
       return `
         <div class="popup-departure">
-          <span class="route-badge mini ${departureTransportType(departure) === 'tram' ? 'tram' : ''}" style="--badge-color: ${routeColor(departure.line, departureTransportType(departure))}">${escapeHtml(departure.line)}</span>
+          <span class="route-badge mini${routeBadgeModeClass(departureTransportType(departure))}" style="--badge-color: ${routeColor(departure.line, departureTransportType(departure))}">${escapeHtml(departure.line)}</span>
           <span>
             <strong>${escapeHtml(departure.destination || '')}</strong>
             <small>${escapeHtml(minutes)} · ${escapeHtml(departure.expectedTime)}</small>
@@ -4770,6 +4648,105 @@ function showScheduleStopHighlight(stop) {
   });
 }
 
+function renderScheduleRouteHighlight(route, selectedDeparture = null) {
+  clearScheduleRouteHighlight();
+  if (!route || !state.scheduleRouteHighlightLayer) {
+    return;
+  }
+
+  const points = scheduleRouteHighlightPoints(route);
+  if (points.length < 2) {
+    return;
+  }
+
+  const routeType = routeTransportType(route);
+  const color = routeColor(route.line, routeType);
+  const segments = routeLineSegments(points);
+  const label = selectedDeparture
+    ? `Valitud sõit ${route.line} - ${minutesToClock(selectedDeparture.time)}`
+    : `Valitud marsruut ${route.line}`;
+
+  segments.forEach((segment) => {
+    L.polyline(segment, {
+      pane: 'scheduleRoutePane',
+      color: state.theme === 'dark' ? '#0b1117' : '#ffffff',
+      weight: 10,
+      opacity: 0.82,
+      lineCap: 'round',
+      lineJoin: 'round',
+      interactive: false,
+    }).addTo(state.scheduleRouteHighlightLayer);
+
+    const line = L.polyline(segment, {
+      pane: 'scheduleRoutePane',
+      color,
+      weight: 5,
+      opacity: 0.92,
+      lineCap: 'round',
+      lineJoin: 'round',
+      dashArray: routeDirectionIndex(route) % 2 === 1 ? '1 12' : null,
+    }).addTo(state.scheduleRouteHighlightLayer);
+
+    line.bindTooltip(label, { sticky: true, opacity: 0.95 });
+  });
+}
+
+function refreshScheduleRouteHighlight() {
+  const route = state.scheduleRoutes[state.scheduleRouteIndex];
+  if (!route) {
+    clearScheduleRouteHighlight();
+    return;
+  }
+
+  const schedule = buildStopSchedule(route, state.scheduleStopIndex);
+  const selectedDeparture = schedule.all.find((departure) => departure.key === state.scheduleSelectedTripKey) || null;
+  renderScheduleRouteHighlight(route, selectedDeparture);
+}
+
+function scheduleRouteHighlightPoints(route) {
+  const type = routeTransportType(route);
+  const line = normalizeLine(String(route.line || ''));
+  const tag = normalizedRouteDirectionTag(route.tag);
+  const exactRoute = state.routes.find((candidate) => {
+    return routeTransportType(candidate) === type
+      && normalizeLine(String(candidate.line || '')) === line
+      && normalizedRouteDirectionTag(candidate.tag) === tag
+      && Array.isArray(candidate.points)
+      && candidate.points.length >= 2
+      && candidate.shapeQuality !== 'stops-only';
+  });
+
+  if (exactRoute) {
+    return exactRoute.points;
+  }
+
+  const sameLineRoute = state.routes.find((candidate) => {
+    return routeTransportType(candidate) === type
+      && normalizeLine(String(candidate.line || '')) === line
+      && (!tag || normalizedRouteDirectionTag(candidate.tag) === tag)
+      && Array.isArray(candidate.points)
+      && candidate.points.length >= 2
+      && candidate.shapeQuality !== 'stops-only';
+  });
+
+  if (sameLineRoute) {
+    return sameLineRoute.points;
+  }
+
+  return type === 'tram' ? [] : (route.points || []);
+}
+
+function normalizedRouteDirectionTag(tag) {
+  const value = String(tag || '').toLowerCase();
+  if (/^a.*-b/.test(value)) return 'a-b';
+  if (/^b.*-a/.test(value)) return 'b-a';
+  return value;
+}
+
+function clearScheduleRouteHighlight() {
+  state.scheduleRouteHighlightLayer?.clearLayers();
+}
+
 function clearScheduleStopHighlight() {
   state.scheduleStopHighlightLayer?.clearLayers();
 }
@@ -4808,7 +4785,10 @@ async function fetchDepartures(stop) {
 function renderDepartures() {
   const departures = state.departures.filter((departure) => departureTransportType(departure) === activeTransportType());
   if (departures.length === 0) {
-    els.departures.innerHTML = '<div class="empty-state">Väljumisi ei ole</div>';
+    const emptyText = activeTransportType() === 'train'
+      ? 'Sellest peatusest rongiväljumisi ei leitud'
+      : 'Väljumisi ei ole';
+    els.departures.innerHTML = `<div class="empty-state">${escapeHtml(emptyText)}</div>`;
     return;
   }
 
@@ -4818,7 +4798,7 @@ function renderDepartures() {
     const delayText = delayMinutes >= 2 ? `+${delayMinutes} min` : delayMinutes <= -1 ? `${delayMinutes} min` : 'õigeaegne';
     return `
       <article class="departure ${delayClass}">
-        <span class="route-badge ${departureTransportType(departure) === 'tram' ? 'tram' : ''}" style="--badge-color: ${routeColor(departure.line, departureTransportType(departure))}">${escapeHtml(departure.line)}</span>
+        <span class="route-badge${routeBadgeModeClass(departureTransportType(departure))}" style="--badge-color: ${routeColor(departure.line, departureTransportType(departure))}">${escapeHtml(departure.line)}</span>
         <div>
           <strong>${escapeHtml(departure.destination || '')}</strong>
           <span>${departure.scheduledTime} plaanis</span>
@@ -4833,6 +4813,15 @@ function renderDepartures() {
 }
 
 async function fetchScheduleLines() {
+  if (activeTransportType() === 'train') {
+    state.scheduleAvailableLines = [];
+    renderScheduleLineOptions();
+    if (els.scheduleSummary) {
+      els.scheduleSummary.textContent = 'Rongid peatuse tabloos';
+    }
+    return;
+  }
+
   try {
     const data = await fetchJson(`api.html?action=lines&type=${encodeURIComponent(activeTransportType())}`);
     state.scheduleAvailableLines = Array.isArray(data.lines)
@@ -4858,6 +4847,13 @@ function renderScheduleLineOptions() {
   }
 
   const currentLine = normalizeLine(state.scheduleLine || state.selectedLines[0] || defaultLinesForTransport()[0] || '');
+  if (activeTransportType() === 'train') {
+    els.scheduleLineSelect.innerHTML = '<option value="">Rongipeatusest</option>';
+    els.scheduleLineSelect.value = '';
+    els.scheduleLineSelect.disabled = true;
+    return;
+  }
+
   const lines = uniqueSortedLines([
     ...state.selectedLines,
     ...state.scheduleAvailableLines,
@@ -4875,6 +4871,7 @@ function renderScheduleLineOptions() {
     return `<option value="${escapeHtml(line)}"${selected}>${escapeHtml(line)}</option>`;
   }).join('');
   els.scheduleLineSelect.value = currentLine;
+  els.scheduleLineSelect.disabled = false;
 }
 
 function selectScheduleLine(value) {
@@ -4887,6 +4884,7 @@ function selectScheduleLine(value) {
   state.scheduleRouteIndex = 0;
   state.scheduleStopIndex = 0;
   state.scheduleSelectedTripKey = '';
+  clearScheduleRouteHighlight();
   clearScheduleStopHighlight();
   saveScheduleLine();
   renderScheduleLineOptions();
@@ -4894,6 +4892,11 @@ function selectScheduleLine(value) {
 }
 
 async function fetchSchedule() {
+  if (activeTransportType() === 'train') {
+    renderScheduleEmpty('Rongide detailne sõiduplaan pole selles andmeallikas saadaval. Vali rongipeatus peatuse tabloost, et näha lähimaid rongiväljumisi.');
+    return;
+  }
+
   const line = normalizeLine(state.scheduleLine || state.selectedLines[0] || defaultLinesForTransport()[0] || '');
   if (!line) {
     renderScheduleEmpty('Vali liin');
@@ -5220,6 +5223,8 @@ function scheduleStopForSelection(stop) {
 }
 
 function renderScheduleEmpty(message) {
+  clearScheduleRouteHighlight();
+  clearScheduleStopHighlight();
   if (els.scheduleSummary) {
     els.scheduleSummary.textContent = '-';
   }
@@ -5236,6 +5241,8 @@ function renderScheduleEmpty(message) {
 }
 
 function renderScheduleError(message) {
+  clearScheduleRouteHighlight();
+  clearScheduleStopHighlight();
   if (els.scheduleSummary) {
     els.scheduleSummary.textContent = 'Viga';
   }
@@ -5279,7 +5286,7 @@ function renderScheduleRoute() {
   const schedule = buildStopSchedule(route, state.scheduleStopIndex);
   const todayDepartures = scheduleDeparturesForToday(schedule);
   const nextDepartures = scheduleNextDepartures(todayDepartures.length ? todayDepartures : schedule.all);
-  const selectedDeparture = schedule.all.find((departure) => departure.key === state.scheduleSelectedTripKey);
+  const selectedDeparture = selectedScheduleDeparture(schedule, nextDepartures);
   const selectedTripStops = selectedDeparture ? scheduleTripTimelineRows(route, selectedDeparture, selectedStop) : [];
   const stopNavEntries = selectedTripStops.length > 0
     ? selectedTripStops.map((row) => {
@@ -5346,6 +5353,8 @@ function renderScheduleRoute() {
           </div>
         </div>
 
+        ${selectedDeparture ? renderScheduleTripTimeline(route, selectedDeparture, selectedStop) : ''}
+
         <div class="schedule-timetable-grid">
           ${renderScheduleTable('weekday', 'Tööpäev', schedule.groups.weekday)}
           ${renderScheduleTable('saturday', 'Laupäev', schedule.groups.saturday)}
@@ -5389,7 +5398,18 @@ function renderScheduleRoute() {
     });
   });
 
+  renderScheduleRouteHighlight(route, selectedDeparture);
   hydrateIcons();
+}
+
+function selectedScheduleDeparture(schedule, nextDepartures) {
+  let selected = schedule.all.find((departure) => departure.key === state.scheduleSelectedTripKey);
+  if (!selected && nextDepartures.length > 0) {
+    selected = nextDepartures[0];
+    state.scheduleSelectedTripKey = selected.key;
+  }
+
+  return selected || null;
 }
 
 function renderScheduleTable(key, title, departures) {
@@ -5456,7 +5476,7 @@ function renderScheduleTripTimeline(route, departure, selectedStop) {
       <div class="schedule-trip-head">
         <span class="route-badge mini${routeBadgeModeClass(routeType)}" data-line="${escapeHtml(route.line)}" style="--badge-color: ${routeColor(route.line, routeType)}">${escapeHtml(route.line)}</span>
         <span>
-          <strong>Väljumine ${escapeHtml(minutesToClock(departure.time))}</strong>
+          <strong>Valitud sõit ${escapeHtml(minutesToClock(departure.time))}</strong>
           <small>${escapeHtml(source.name || scheduleDirectionTitle(route, state.scheduleRouteIndex))}</small>
         </span>
       </div>
@@ -6564,6 +6584,11 @@ function vehicleFactIconHtml(icon) {
 }
 
 function renderLineTags() {
+  if (activeTransportType() === 'train') {
+    els.selectedLines.innerHTML = '<span class="empty-tag">Rongide väljumised kuvatakse valitud peatuse tabloos</span>';
+    return;
+  }
+
   if (state.selectedLines.length === 0) {
     els.selectedLines.innerHTML = `<span class="empty-tag">Ühtegi ${transportLineLabel().toLocaleLowerCase('et')}i pole valitud</span>`;
     return;
@@ -7157,6 +7182,21 @@ function routeColor(line, type = activeTransportType()) {
     }
   }
 
+  if (normalizedType === 'train') {
+    const trainPreferred = {
+      A: '#2563eb',
+      R: '#2563eb',
+      RE: '#2563eb',
+      ELR: '#2563eb',
+    };
+
+    if (Object.prototype.hasOwnProperty.call(trainPreferred, text)) {
+      return trainPreferred[text];
+    }
+
+    return '#2563eb';
+  }
+
   const preferred = {
     18: '#16a34a',
     40: '#0284c7',
@@ -7246,16 +7286,16 @@ function registerServiceWorker() {
   if ('serviceWorker' in navigator) {
     let reloadedForWorker = false;
     navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (reloadedForWorker || sessionStorage.getItem('bussradar.swReloaded') === '180') {
+      if (reloadedForWorker || sessionStorage.getItem('bussradar.swReloaded') === '184') {
         return;
       }
 
       reloadedForWorker = true;
-      sessionStorage.setItem('bussradar.swReloaded', '180');
+      sessionStorage.setItem('bussradar.swReloaded', '184');
       window.location.reload();
     });
 
-    navigator.serviceWorker.register('service-worker.js?v=180').then((registration) => {
+    navigator.serviceWorker.register('service-worker.js?v=184').then((registration) => {
       registration.update?.();
 
       if (registration.waiting) {

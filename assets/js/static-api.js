@@ -26,7 +26,7 @@
       case 'stops':
         return handleStops(parsed.searchParams);
       case 'mapStops':
-        return handleMapStops();
+        return handleMapStops(parsed.searchParams);
       case 'lines':
         return handleLines(parsed.searchParams);
       case 'routes':
@@ -74,12 +74,17 @@
 
   async function handleStops(params) {
     const query = cleanText(params.get('q') || '');
+    const wantedType = cleanText(params.get('type') || '').toLowerCase();
     if (query.length < 2) {
       return { ok: true, stops: [] };
     }
 
     const raw = await fetchText(`${DATA_BASE}/data/stops.txt`, { ttl: 60 * 60 * 1000 });
-    const stops = parseTallinnStops(raw, query, false).slice(0, 18);
+    const sourceStops = parseTallinnStops(raw, query, false);
+    const stops = (wantedType === 'train'
+      ? sourceStops.filter(isTrainStop).map(withTrainStopLineRef)
+      : sourceStops
+    ).slice(0, 18);
 
     return {
       ok: true,
@@ -88,9 +93,13 @@
     };
   }
 
-  async function handleMapStops() {
+  async function handleMapStops(params) {
+    const wantedType = cleanText(params.get('type') || '').toLowerCase();
     const raw = await fetchText(`${DATA_BASE}/data/stops.txt`, { ttl: 60 * 60 * 1000 });
-    const stops = parseStructuredStops(raw).filter((stop) => isTallinnMapCoordinate(stop.lat, stop.lon));
+    const sourceStops = parseStructuredStops(raw).filter((stop) => isTallinnMapCoordinate(stop.lat, stop.lon));
+    const stops = wantedType === 'train'
+      ? sourceStops.filter(isTrainStop).map(withTrainStopLineRef)
+      : sourceStops;
 
     return {
       ok: true,
@@ -116,7 +125,7 @@
   async function handleRoutes(params) {
     const lineFilter = normalizeLineList(params.get('lines') || '');
     const wantedType = cleanText(params.get('type') || 'bus').toLowerCase();
-    if (lineFilter.length === 0) {
+    if (wantedType === 'train' || lineFilter.length === 0) {
       return { ok: true, routes: [] };
     }
 
@@ -131,18 +140,14 @@
     });
 
     const stopRoutes = parseRouteLines(routesRaw, stopsByPlatformId, lineFilter, false, wantedType);
-    const shapeRoutes = wantedType === 'bus'
-      ? await parseOfficialLineShapeRoutes(lineFilter, wantedType)
-      : [];
+    const shapeRoutes = await parseOfficialLineShapeRoutes(lineFilter, wantedType);
     const routes = shapeRoutes.length > 0
       ? mergeShapeRoutesWithStops(shapeRoutes, stopRoutes)
       : stopRoutes.map((route) => ({ ...route, shapeQuality: 'route-stops' }));
 
     return {
       ok: true,
-      source: wantedType === 'bus'
-        ? `${DATA_BASE}/data/tallinna-linn_bus_<line>.txt`
-        : `${DATA_BASE}/data/routes.txt`,
+      source: `${DATA_BASE}/data/tallinna-linn_${shapeTransportName(wantedType)}_<line>.txt`,
       updatedAt: new Date().toISOString(),
       routes,
     };
@@ -151,7 +156,7 @@
   async function handleSchedule(params) {
     const lineFilter = normalizeLineList(params.get('line') || params.get('lines') || '');
     const wantedType = cleanText(params.get('type') || 'bus').toLowerCase();
-    if (lineFilter.length === 0) {
+    if (wantedType === 'train' || lineFilter.length === 0) {
       return { ok: true, routes: [] };
     }
 
@@ -544,9 +549,11 @@
         return 'data/live/routes.txt';
       }
 
-      const shape = parsed.pathname.match(/^\/data\/tallinna-linn_(?:bus|tram)_([^/]+)\.txt$/);
+      const shape = parsed.pathname.match(/^\/data\/tallinna-linn_(bus|tram)_([^/]+)\.txt$/);
       if (shape) {
-        return `data/live/shapes/${encodeURIComponent(shape[1])}.txt`;
+        const type = shape[1] === 'tram' ? 'tram' : 'bus';
+        const line = encodeURIComponent(shape[2]);
+        return type === 'tram' ? `data/live/shapes/tram/${line}.txt` : `data/live/shapes/${line}.txt`;
       }
     } catch {
       return '';
@@ -710,6 +717,65 @@
       lat: stop.lat,
       lon: stop.lon,
     }));
+  }
+
+  function isTrainStop(stop) {
+    const name = cleanText(stop?.name || '').toLocaleLowerCase('et');
+    const street = cleanText(stop?.street || '').toLocaleLowerCase('et');
+    const text = `${name} ${street}`;
+    const excluded = [
+      'bussijaam',
+      'hobujaama',
+      'lennujaam',
+      'kaubajaama',
+      'koorejaama',
+      'raadiojaama',
+    ];
+    if (excluded.some((needle) => text.includes(needle))) {
+      return false;
+    }
+
+    if (text.includes('train station') || text.includes('raudteejaam') || text.includes('rongijaam')) {
+      return true;
+    }
+
+    const railStopNames = new Set([
+      'balti jaam',
+      'balti jaam 1',
+      'balti jaam 2',
+      'balti jaam 3',
+      'balti jaam 4',
+      'balti jaam 5',
+      'balti jaam 6',
+      'hiiu jaam',
+      'jarve',
+      'j\u00e4rve',
+      'kitsek\u00fcla',
+      'kivim\u00e4e jaam',
+      'laagri',
+      'lillek\u00fcla jaam',
+      'm\u00e4nniku jaam',
+      'n\u00f5mme',
+      'padula',
+      'p\u00e4\u00e4sk\u00fcla jaam',
+      'rahum\u00e4e',
+      'saue jaam',
+      'tallinn-v\u00e4ike',
+      'urda jaam',
+      'valdeku',
+      'vesse',
+      '\u00fclemiste jaam',
+    ]);
+
+    return railStopNames.has(name);
+  }
+
+  function withTrainStopLineRef(stop) {
+    return {
+      ...stop,
+      type: 'train',
+      lineRefs: [{ line: 'R', type: 'train' }],
+    };
   }
 
   function parseAvailableLines(raw, wantedType = 'bus') {
@@ -1123,10 +1189,12 @@
   function transportTypeFromCode(code) {
     if (code === '1') return 'trolleybus';
     if (code === '3') return 'tram';
+    if (code === '4') return 'train';
     return 'bus';
   }
 
   function sanitizeTransportType(type) {
+    if (type === 'train') return 'train';
     return type === 'tram' ? 'tram' : 'bus';
   }
 
