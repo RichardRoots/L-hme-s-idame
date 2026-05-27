@@ -7521,16 +7521,16 @@ function registerServiceWorker() {
   if ('serviceWorker' in navigator) {
     let reloadedForWorker = false;
     navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (reloadedForWorker || sessionStorage.getItem('bussradar.swReloaded') === '191') {
+      if (reloadedForWorker || sessionStorage.getItem('bussradar.swReloaded') === '192') {
         return;
       }
 
       reloadedForWorker = true;
-      sessionStorage.setItem('bussradar.swReloaded', '191');
+      sessionStorage.setItem('bussradar.swReloaded', '192');
       window.location.reload();
     });
 
-    navigator.serviceWorker.register('service-worker.js?v=191').then((registration) => {
+    navigator.serviceWorker.register('service-worker.js?v=192').then((registration) => {
       registration.update?.();
 
       if (registration.waiting) {

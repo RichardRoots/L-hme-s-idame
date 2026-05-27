@@ -1,6 +1,8 @@
 (function () {
   const USERS_KEY = 'bussradar.staticUsers';
   const SESSION_KEY = 'bussradar.staticSession';
+  const USERNAME_PATTERN = /^[a-z0-9._-]{2,32}$/;
+  const MIN_PASSWORD_LENGTH = 6;
   const DATA_BASE = 'https://transport.tallinn.ee';
   const DEFAULT_PROXY_BASES = [
     'https://r.jina.ai/http://{rawUrl}',
@@ -241,7 +243,7 @@
       throw new Error('Kasutajanimi või parool ei sobi.');
     }
 
-    localStorage.setItem(SESSION_KEY, username);
+    writeStorage(SESSION_KEY, username);
     return authPayload(username);
   }
 
@@ -254,8 +256,8 @@
       throw new Error('Kasutajanimi võib sisaldada tähti, numbreid, punkti, alakriipsu ja sidekriipsu.');
     }
 
-    if (password.length < 4) {
-      throw new Error('Parool peab olema vähemalt 4 märki.');
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      throw new Error(`Parool peab olema vähemalt ${MIN_PASSWORD_LENGTH} märki.`);
     }
 
     const store = readUserStore();
@@ -272,13 +274,13 @@
       updatedAt: now,
     };
     writeUserStore(store);
-    localStorage.setItem(SESSION_KEY, username);
+    writeStorage(SESSION_KEY, username);
 
     return authPayload(username);
   }
 
   function handleLogout() {
-    localStorage.removeItem(SESSION_KEY);
+    removeStorage(SESSION_KEY);
     return {
       ok: true,
       authenticated: false,
@@ -300,7 +302,7 @@
 
     const store = readUserStore();
     if (!store.users[username]) {
-      localStorage.removeItem(SESSION_KEY);
+      removeStorage(SESSION_KEY);
       throw new Error('Kasutajat ei leitud.');
     }
 
@@ -336,7 +338,7 @@
     const store = readUserStore();
     const user = store.users[username];
     if (!user) {
-      localStorage.removeItem(SESSION_KEY);
+      removeStorage(SESSION_KEY);
       return {
         ok: true,
         authenticated: false,
@@ -348,18 +350,18 @@
     return {
       ok: true,
       authenticated: true,
-      user: { username },
+      user: { username, createdAt: user.createdAt || null, updatedAt: user.updatedAt || null },
       preferences: normalizePreferences(user.preferences || {}),
     };
   }
 
   function currentUsername() {
-    return normalizeUsername(localStorage.getItem(SESSION_KEY) || '');
+    return normalizeUsername(readStorage(SESSION_KEY, ''));
   }
 
   function readUserStore() {
     try {
-      const parsed = JSON.parse(localStorage.getItem(USERS_KEY) || '{}');
+      const parsed = JSON.parse(readStorage(USERS_KEY, '{}') || '{}');
       return parsed && typeof parsed === 'object' && parsed.users && typeof parsed.users === 'object'
         ? parsed
         : { users: {} };
@@ -369,9 +371,34 @@
   }
 
   function writeUserStore(store) {
-    localStorage.setItem(USERS_KEY, JSON.stringify({
+    writeStorage(USERS_KEY, JSON.stringify({
       users: store.users && typeof store.users === 'object' ? store.users : {},
     }));
+  }
+
+  function readStorage(key, fallback = '') {
+    try {
+      const value = localStorage.getItem(key);
+      return value === null ? fallback : value;
+    } catch {
+      return fallback;
+    }
+  }
+
+  function writeStorage(key, value) {
+    try {
+      localStorage.setItem(key, value);
+    } catch {
+      throw new Error('Brauser ei luba konto andmeid salvestada.');
+    }
+  }
+
+  function removeStorage(key) {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      // Kui salvestusruum on keelatud, pole eemaldada samuti midagi.
+    }
   }
 
   async function hashPassword(username, password) {
@@ -390,6 +417,7 @@
   function defaultPreferences() {
     return {
       lines: [],
+      transportType: 'bus',
       stop: null,
       favoriteStops: [],
       lineColors: {},
@@ -405,18 +433,19 @@
       : String(payload.lines || '').split(/[\s,;]+/);
 
     preferences.lines = [...new Set(lines.map((line) => normalizeLine(String(line))).filter(Boolean))];
+    preferences.transportType = sanitizeTransportType(payload.transportType || 'bus');
     preferences.stop = normalizePreferenceStop(payload.stop);
     preferences.favoriteStops = Array.isArray(payload.favoriteStops)
       ? payload.favoriteStops.map(normalizePreferenceStop).filter(Boolean)
       : [];
     preferences.lineColors = Object.fromEntries(
       Object.entries(payload.lineColors || {})
-        .map(([line, color]) => [normalizeLine(line), String(color)])
+        .map(([line, color]) => [normalizePreferenceLineStateKey(line), String(color)])
         .filter(([line, color]) => line && /^#[0-9a-f]{6}$/i.test(color))
     );
     preferences.lineEmphasis = Object.fromEntries(
       Object.entries(payload.lineEmphasis || {})
-        .map(([line, value]) => [normalizeLine(line), clamp(Number(value), 0, 1)])
+        .map(([line, value]) => [normalizePreferenceLineStateKey(line), clamp(Number(value), 0, 1)])
         .filter(([line, value]) => line && Number.isFinite(value))
     );
     preferences.theme = payload.theme === 'dark' ? 'dark' : 'light';
@@ -444,6 +473,18 @@
       lat,
       lon,
     };
+  }
+
+  function normalizePreferenceLineStateKey(value) {
+    const text = cleanText(value);
+    const match = text.match(/^(bus|tram):(.+)$/i);
+    if (match) {
+      const line = normalizeLine(match[2]);
+      return line ? lineStateKey(line, match[1].toLowerCase()) : '';
+    }
+
+    const line = normalizeLine(text);
+    return line ? lineStateKey(line, 'bus') : '';
   }
 
   async function fetchText(url, { ttl = 0, preferLive = false } = {}) {
@@ -484,7 +525,7 @@
   }
 
   function proxyUrls(url) {
-    const custom = window.BUSSRADAR_CORS_PROXY || localStorage.getItem('bussradar.corsProxy') || '';
+    const custom = window.BUSSRADAR_CORS_PROXY || readStorage('bussradar.corsProxy', '') || '';
     return [custom, ...DEFAULT_PROXY_BASES]
       .filter(Boolean)
       .map((base) => buildProxyUrl(base, url));
@@ -1067,7 +1108,7 @@
 
   function normalizeUsername(username) {
     const value = cleanText(username).toLowerCase();
-    return /^[a-z0-9._-]{2,32}$/.test(value) ? value : '';
+    return USERNAME_PATTERN.test(value) ? value : '';
   }
 
   function parseScaledCoordinate(value, scale) {
@@ -1129,6 +1170,10 @@
 
   function sanitizeTransportType(type) {
     return type === 'tram' ? 'tram' : 'bus';
+  }
+
+  function lineStateKey(line, type = 'bus') {
+    return `${sanitizeTransportType(type)}:${normalizeLine(line)}`;
   }
 
   function shapeTransportName(type) {

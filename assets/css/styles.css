@@ -1137,6 +1137,47 @@ body.is-live-refreshing .status-pill {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 17%, transparent);
 }
 
+.auth-form input.is-invalid {
+  border-color: var(--red);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--red) 14%, transparent);
+}
+
+.auth-password-field {
+  position: relative;
+  min-width: 0;
+}
+
+.auth-password-field input {
+  padding-right: 48px;
+}
+
+.auth-password-field .password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  width: 34px;
+  min-height: 34px;
+  border-color: transparent;
+  transform: translateY(-50%);
+}
+
+.auth-password-field .password-toggle:hover {
+  transform: translateY(-50%);
+}
+
+.auth-form[aria-busy="true"],
+.signed-in-actions[aria-busy="true"] {
+  pointer-events: none;
+}
+
+.icon-button:disabled,
+.tool-button:disabled,
+.install-button:disabled,
+.auth-form input:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
 .account-actions {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -1157,6 +1198,14 @@ body.is-live-refreshing .status-pill {
   margin-top: 10px;
   color: var(--muted);
   font-size: 0.84rem;
+}
+
+.account-message.is-error {
+  color: var(--red);
+}
+
+.account-message.is-success {
+  color: var(--green);
 }
 
 .favorite-stop-list {

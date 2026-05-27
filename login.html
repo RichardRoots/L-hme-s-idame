@@ -20,7 +20,7 @@
   <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
   <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png">
   <link rel="preconnect" href="https://unpkg.com">
-  <link rel="stylesheet" href="assets/css/styles.css?v=191">
+  <link rel="stylesheet" href="assets/css/styles.css?v=192">
 </head>
 <body>
   <div class="auth-shell">
@@ -51,12 +51,17 @@
           <span id="authStatus">Pole sisse logitud</span>
         </div>
 
-        <form class="auth-form" id="authForm">
+        <form class="auth-form" id="authForm" novalidate>
           <label class="field-label" for="authUsername">Kasutajanimi</label>
-          <input id="authUsername" name="username" type="text" autocomplete="username" spellcheck="false">
+          <input id="authUsername" name="username" type="text" autocomplete="username" autocapitalize="none" inputmode="text" spellcheck="false" required minlength="2" maxlength="32" pattern="[A-Za-z0-9._-]{2,32}">
 
           <label class="field-label" for="authPassword">Parool</label>
-          <input id="authPassword" name="password" type="password" autocomplete="current-password">
+          <div class="auth-password-field">
+            <input id="authPassword" name="password" type="password" autocomplete="current-password" required minlength="6" maxlength="128">
+            <button class="icon-button muted password-toggle" id="passwordToggle" type="button" title="Näita parooli" aria-label="Näita parooli" aria-pressed="false">
+              <i data-lucide="eye"></i>
+            </button>
+          </div>
 
           <div class="account-actions">
             <button class="tool-button" id="loginButton" type="submit">
@@ -81,13 +86,13 @@
           </button>
         </div>
 
-        <div class="account-message" id="authMessage"></div>
+        <div class="account-message" id="authMessage" role="status" aria-live="polite"></div>
       </section>
     </main>
   </div>
 
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
-  <script src="assets/js/static-api.js?v=191"></script>
-  <script src="assets/js/auth.js?v=191" defer></script>
+  <script src="assets/js/static-api.js?v=192"></script>
+  <script src="assets/js/auth.js?v=192" defer></script>
 </body>
 </html>
