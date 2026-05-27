@@ -3,7 +3,6 @@ const DEFAULT_LINES = ['18', '40', '60'];
 const DEFAULT_LINES_BY_TYPE = {
   bus: DEFAULT_LINES,
   tram: ['1', '2', '3', '4', '5'],
-  train: [],
 };
 const DEFAULT_STOP = { id: '1297', name: 'Laikmaa', lat: 59.43614, lon: 24.75755 };
 const REFRESH_SECONDS = 10;
@@ -186,6 +185,8 @@ function cacheElements() {
   els.weatherTemp = document.querySelector('#weatherTemp');
   els.weatherText = document.querySelector('#weatherText');
   els.walkingAdvice = document.querySelector('#walkingAdvice');
+  els.weatherMetrics = document.querySelector('#weatherMetrics');
+  els.weatherForecast = document.querySelector('#weatherForecast');
   els.toggleSchools = document.querySelector('#toggleSchools');
   els.schoolCrowds = document.querySelector('#schoolCrowds');
   els.delaySummary = document.querySelector('#delaySummary');
@@ -254,10 +255,6 @@ function updateMapDensity() {
 }
 
 function sanitizeTransportType(type) {
-  if (type === 'train') {
-    return 'train';
-  }
-
   return type === 'tram' ? 'tram' : 'bus';
 }
 
@@ -266,15 +263,16 @@ function activeTransportType() {
 }
 
 function visibleTransportTypes() {
-  if (activeTransportType() === 'train') {
-    return ['train'];
-  }
-
-  if (activeTransportType() !== 'tram') {
+  const type = activeTransportType();
+  if (type !== 'tram') {
     return ['bus'];
   }
 
   return state.showBusesInTram ? ['bus', 'tram'] : ['tram'];
+}
+
+function isTransportTypeVisible(type) {
+  return visibleTransportTypes().includes(sanitizeTransportType(type));
 }
 
 function selectedLinesForTransport(type = activeTransportType()) {
@@ -295,48 +293,45 @@ function visibleLineConfigs() {
 
 function transportMapOpacity(type = activeTransportType()) {
   const normalizedType = sanitizeTransportType(type);
+  if (!isTransportTypeVisible(normalizedType)) {
+    return 0;
+  }
+
   return activeTransportType() === 'tram' && normalizedType === 'bus' ? 0.52 : 1;
 }
 
 function transportLabel(type = activeTransportType()) {
   const normalizedType = sanitizeTransportType(type);
-  if (normalizedType === 'train') return 'rong';
   return normalizedType === 'tram' ? 'tramm' : 'buss';
 }
 
 function transportPluralLabel(type = activeTransportType()) {
   const normalizedType = sanitizeTransportType(type);
-  if (normalizedType === 'train') return 'ronge';
   return normalizedType === 'tram' ? 'tramme' : 'busse';
 }
 
 function transportPluralNominativeLabel(type = activeTransportType()) {
   const normalizedType = sanitizeTransportType(type);
-  if (normalizedType === 'train') return 'rongid';
   return normalizedType === 'tram' ? 'trammid' : 'bussid';
 }
 
 function transportPluralGenitiveLabel(type = activeTransportType()) {
   const normalizedType = sanitizeTransportType(type);
-  if (normalizedType === 'train') return 'rongide';
   return normalizedType === 'tram' ? 'trammide' : 'busside';
 }
 
 function transportTitleLabel(type = activeTransportType()) {
   const normalizedType = sanitizeTransportType(type);
-  if (normalizedType === 'train') return 'Rong';
   return normalizedType === 'tram' ? 'Tramm' : 'Buss';
 }
 
 function transportLineLabel(type = activeTransportType()) {
   const normalizedType = sanitizeTransportType(type);
-  if (normalizedType === 'train') return 'Rongiliin';
   return normalizedType === 'tram' ? 'Trammiliin' : 'Bussiliin';
 }
 
 function transportPanelTitle(type = activeTransportType()) {
   const normalizedType = sanitizeTransportType(type);
-  if (normalizedType === 'train') return 'Rongid';
   return normalizedType === 'tram' ? 'Valitud trammid' : 'Valitud bussid';
 }
 
@@ -350,7 +345,6 @@ function routeTransportType(route) {
 
 function routeBadgeModeClass(type = activeTransportType()) {
   const normalizedType = sanitizeTransportType(type);
-  if (normalizedType === 'train') return ' train';
   return normalizedType === 'tram' ? ' tram' : '';
 }
 
@@ -369,20 +363,17 @@ function lineStateKey(line, type = activeTransportType()) {
 function updateTransportUi() {
   const type = activeTransportType();
   const tram = type === 'tram';
-  const train = type === 'train';
   document.body?.classList.toggle('transport-tram', tram);
-  document.body?.classList.toggle('transport-train', train);
   document.body?.classList.toggle('transport-bus', type === 'bus');
 
   if (els.transportModeToggle) {
     const nextType = nextTransportType();
     const title = `Lülita ${transportPluralNominativeLabel(nextType)} sisse`;
-    els.transportModeToggle.classList.toggle('is-active', type !== 'bus');
-    els.transportModeToggle.classList.toggle('is-train-next', nextType === 'train');
-    els.transportModeToggle.setAttribute('aria-pressed', type !== 'bus' ? 'true' : 'false');
+    els.transportModeToggle.classList.toggle('is-active', tram);
+    els.transportModeToggle.setAttribute('aria-pressed', tram ? 'true' : 'false');
     els.transportModeToggle.setAttribute('aria-label', title);
     els.transportModeToggle.title = title;
-    els.transportModeToggle.querySelector('i')?.setAttribute('data-lucide', nextType === 'train' ? 'train-front' : nextType === 'tram' ? 'tram-front' : 'bus-front');
+    els.transportModeToggle.querySelector('i')?.setAttribute('data-lucide', nextType === 'tram' ? 'tram-front' : 'bus-front');
   }
   if (els.transportModeText) {
     els.transportModeText.textContent = transportPluralNominativeLabel(nextTransportType()).replace(/^./, (letter) => letter.toUpperCase());
@@ -394,8 +385,8 @@ function updateTransportUi() {
     els.lineLabel.textContent = transportLineLabel(type);
   }
   if (els.lineInput) {
-    els.lineInput.placeholder = train ? 'Rongid tulevad peatuse tabloos' : tram ? 'nt 1' : 'nt 18';
-    els.lineInput.disabled = train;
+    els.lineInput.placeholder = tram ? 'nt 1' : 'nt 18';
+    els.lineInput.disabled = false;
   }
   if (els.tramBusOverlayToggle) {
     const busesVisible = Boolean(state.showBusesInTram);
@@ -790,12 +781,6 @@ function bindEvents() {
 
   els.lineForm.addEventListener('submit', (event) => {
     event.preventDefault();
-    if (activeTransportType() === 'train') {
-      setStatus('Rongid vali peatuse tabloost', false);
-      els.stopSearch?.focus();
-      return;
-    }
-
     const value = normalizeLine(els.lineInput.value);
     if (!value) return;
 
@@ -1252,14 +1237,6 @@ function startRefreshLoop() {
 }
 
 async function fetchVehicles() {
-  if (activeTransportType() === 'train') {
-    state.vehicles = [];
-    renderVehicles();
-    renderDelayPanel();
-    setStatus('Rongide GPS puudub', false);
-    return;
-  }
-
   const configs = visibleLineConfigs();
   if (configs.length === 0) {
     state.vehicles = [];
@@ -1326,11 +1303,24 @@ async function ensureDelaySchedules(lines, type = activeTransportType()) {
   }));
 }
 
+function vehicleMapOpacity(vehicle) {
+  const type = vehicleTransportType(vehicle);
+  return lineMapOpacity(vehicle.line, type) * transportMapOpacity(type);
+}
+
+function isVehicleMapVisible(vehicle) {
+  return vehicleMapOpacity(vehicle) > 0;
+}
+
+function isVehiclePanelVisible(vehicle) {
+  return vehicleTransportType(vehicle) === activeTransportType() && isVehicleMapVisible(vehicle);
+}
+
 function renderVehicles() {
   const activeKeys = new Set();
 
   state.vehicles.forEach((vehicle) => {
-    const opacity = lineMapOpacity(vehicle.line, vehicleTransportType(vehicle)) * transportMapOpacity(vehicleTransportType(vehicle));
+    const opacity = vehicleMapOpacity(vehicle);
     if (opacity <= 0) {
       return;
     }
@@ -1381,7 +1371,7 @@ function renderVehicles() {
     }
   });
 
-  const panelVehicleCount = state.vehicles.filter((vehicle) => vehicleTransportType(vehicle) === activeTransportType()).length;
+  const panelVehicleCount = state.vehicles.filter(isVehiclePanelVisible).length;
   els.vehicleCount.textContent = `${panelVehicleCount} kaardil`;
   renderVehicleList();
   renderTransferVehicleOptions('current');
@@ -1389,8 +1379,9 @@ function renderVehicles() {
   updateTransferVehicleHighlights();
   updateTransferResult();
 
-  if (state.vehicles.length > 0 && state.shouldFitVehicles) {
-    const bounds = L.latLngBounds(state.vehicles.map((vehicle) => [vehicle.lat, vehicle.lon]));
+  const mapVehicles = state.vehicles.filter(isVehicleMapVisible);
+  if (mapVehicles.length > 0 && state.shouldFitVehicles) {
+    const bounds = L.latLngBounds(mapVehicles.map((vehicle) => [vehicle.lat, vehicle.lon]));
     if (bounds.isValid()) {
       state.map.fitBounds(bounds.pad(0.28), { maxZoom: 15, animate: true });
     }
@@ -1483,48 +1474,9 @@ async function loadMapStops(type = activeTransportType()) {
     const data = await fetchJson(`api.html?${params.toString()}`);
     state.mapStops = data.stops || [];
     renderMapStops();
-    selectNearbyTrainStopIfNeeded(type);
   } catch (error) {
     setStatus('Peatused puuduvad', false);
   }
-}
-
-function selectNearbyTrainStopIfNeeded(type) {
-  if (sanitizeTransportType(type) !== 'train' || state.mapStops.length === 0) {
-    return;
-  }
-
-  const selected = state.selectedStop;
-  const alreadyTrainStop = state.mapStops.some((stop) => stopsRepresentSamePlace(stop, selected));
-  if (alreadyTrainStop) {
-    return;
-  }
-
-  const reference = isStopCoordinate(selected) ? selected : { lat: TALLINN_CENTER[0], lon: TALLINN_CENTER[1] };
-  const nearest = state.mapStops
-    .map((stop) => ({
-      stop,
-      distance: distanceMeters(reference.lat, reference.lon, stop.lat, stop.lon),
-    }))
-    .sort((a, b) => a.distance - b.distance)[0]?.stop;
-
-  if (nearest) {
-    selectStop(nearest);
-  }
-}
-
-function stopsRepresentSamePlace(first, second) {
-  if (!first || !second) {
-    return false;
-  }
-
-  const firstIds = [first.id, first.stopId, first.siriId].filter(Boolean).map(String);
-  const secondIds = [second.id, second.stopId, second.siriId].filter(Boolean).map(String);
-  if (firstIds.some((id) => secondIds.includes(id))) {
-    return true;
-  }
-
-  return distanceMeters(first.lat, first.lon, second.lat, second.lon) <= 35;
 }
 
 function renderMapStops() {
@@ -1905,7 +1857,7 @@ function renderTransferVehicleOptions(kind = 'current') {
 function transferVehicleOptions() {
   return [...state.vehicles]
     .filter(isVehicleCoordinate)
-    .filter((vehicle) => vehicleTransportType(vehicle) === activeTransportType())
+    .filter(isVehiclePanelVisible)
     .sort((a, b) => {
       return String(a.line).localeCompare(String(b.line), 'et', { numeric: true })
         || String(a.destination || '').localeCompare(String(b.destination || ''), 'et')
@@ -2106,11 +2058,13 @@ function showInstallHelp() {
   const apple = isAppleMobile();
   const steps = apple
     ? [
+      { icon: 'compass', title: 'Ava Safaris', body: 'iPhone ja iPad lisavad veebirakenduse avakuvale Safari kaudu.' },
       { icon: 'share', title: 'Ava jagamise menüü', body: 'Vajuta Safari alumisel ribal jagamise ikooni.' },
-      { icon: 'plus', title: 'Lisa avakuvale', body: 'Vali “Lisa avakuvale” ja kinnita “Lisa”.' },
+      { icon: 'plus', title: 'Lisa avakuvale', body: 'Vali "Lisa avakuvale" ja kinnita "Lisa".' },
     ]
     : [
-      { icon: 'ellipsis-vertical', title: 'Ava brauseri menüü', body: 'Vali “Installi rakendus” või “Lisa avakuvale”.' },
+      { icon: 'download', title: 'Kasuta paigaldusnuppu', body: 'Kui brauser pakub paigaldust, avaneb kinnituse aken kohe.' },
+      { icon: 'ellipsis-vertical', title: 'Või ava brauseri menüü', body: 'Vali "Installi rakendus" või "Lisa avakuvale".' },
       { icon: 'check-circle-2', title: 'Kinnita paigaldus', body: 'Pärast kinnitamist avaneb BussRadar eraldi rakendusena.' },
     ];
 
@@ -2207,8 +2161,8 @@ function onboardingSteps() {
     {
       selector: '#transportModeToggle',
       icon: 'tram-front',
-      title: 'Bussid, trammid ja rongid',
-      body: 'Vahetab kaardi bussi-, trammi- ja rongivaate vahel. Režiim vahetab ka liinid, sõiduplaani, markerid ja ümberistumise arvutuse.',
+      title: 'Bussid ja trammid',
+      body: 'Vahetab kaardi bussi- ja trammivaate vahel. Režiim vahetab ka liinid, sõiduplaani, markerid ja ümberistumise arvutuse.',
     },
     {
       selector: '#scheduleToggle',
@@ -2759,11 +2713,11 @@ function chooseTransferDefaultDeparture({ force = false } = {}) {
 }
 
 function selectedTransferVehicle() {
-  return state.vehicles.find((vehicle) => vehicleKey(vehicle) === state.transfer.currentVehicleKey) || null;
+  return state.vehicles.find((vehicle) => vehicleKey(vehicle) === state.transfer.currentVehicleKey && isVehiclePanelVisible(vehicle)) || null;
 }
 
 function selectedTransferTargetVehicle() {
-  return state.vehicles.find((vehicle) => vehicleKey(vehicle) === state.transfer.targetVehicleKey) || null;
+  return state.vehicles.find((vehicle) => vehicleKey(vehicle) === state.transfer.targetVehicleKey && isVehiclePanelVisible(vehicle)) || null;
 }
 
 function selectedTransferDeparture() {
@@ -3941,12 +3895,6 @@ async function fetchRoutes() {
   state.routeLayer.clearLayers();
   state.routes = [];
 
-  if (activeTransportType() === 'train') {
-    clearScheduleRouteHighlight();
-    await loadMapStops('train');
-    return;
-  }
-
   const configs = visibleLineConfigs();
   if (configs.length === 0) {
     state.mapStops = [];
@@ -3995,10 +3943,7 @@ function renderRoutes() {
 }
 
 function nextTransportType() {
-  const type = activeTransportType();
-  if (type === 'bus') return 'tram';
-  if (type === 'tram') return 'train';
-  return 'bus';
+  return activeTransportType() === 'bus' ? 'tram' : 'bus';
 }
 
 function routeCanDraw(route) {
@@ -4016,10 +3961,11 @@ function renderOverviewRoutes(styledRoutes) {
       segments = offsetRouteSegments(segments, style.mapSide);
     }
 
-    const color = routeColor(route.line, routeTransportType(route));
-    const emphasis = lineMapOpacity(route.line, routeTransportType(route)) * transportMapOpacity(routeTransportType(route));
+    const routeType = routeTransportType(route);
+    const color = routeColor(route.line, routeType);
+    const emphasis = lineMapOpacity(route.line, routeType) * transportMapOpacity(routeType);
     const dark = state.theme === 'dark';
-    const tram = routeTransportType(route) === 'tram';
+    const tram = routeType === 'tram';
     const mainDash = style.dashArray;
     const mainWeight = style.weight + (dark ? 1 : 0);
 
@@ -4027,7 +3973,7 @@ function renderOverviewRoutes(styledRoutes) {
       pane: 'routePane',
       color: tram ? tramRouteRailColor() : routeGapColor(),
       weight: style.weight + (tram ? 4 : (dark ? 5 : 3)),
-      opacity: (tram ? (dark ? 0.54 : 0.64) : (dark ? (style.dashArray ? 0.72 : 0.58) : (style.dashArray ? 0.58 : 0.44))) * transportMapOpacity(routeTransportType(route)),
+      opacity: (tram ? (dark ? 0.54 : 0.64) : (dark ? (style.dashArray ? 0.72 : 0.58) : (style.dashArray ? 0.58 : 0.44))) * emphasis,
       lineCap: 'round',
       lineJoin: 'round',
       dashArray: tram ? null : style.dashArray,
@@ -4308,26 +4254,28 @@ function routeDirectionIndex(route) {
 function renderRouteStops() {
   const stopsById = new Map();
 
-  state.routes.forEach((route) => {
-    (route.stops || []).forEach((stop) => {
-      const key = stop.stopId || stop.id;
-      const lineRef = {
-        line: normalizeLine(String(route.line || '')),
-        type: routeTransportType(route),
-      };
-      if (!stopsById.has(key)) {
-        stopsById.set(key, { ...stop, lines: [route.line], lineRefs: [lineRef] });
-      } else {
-        const existing = stopsById.get(key);
-        if (!existing.lines.includes(route.line)) {
-          existing.lines.push(route.line);
+  state.routes
+    .filter((route) => lineMapOpacity(route.line, routeTransportType(route)) * transportMapOpacity(routeTransportType(route)) > 0)
+    .forEach((route) => {
+      (route.stops || []).forEach((stop) => {
+        const key = stop.stopId || stop.id;
+        const lineRef = {
+          line: normalizeLine(String(route.line || '')),
+          type: routeTransportType(route),
+        };
+        if (!stopsById.has(key)) {
+          stopsById.set(key, { ...stop, lines: [route.line], lineRefs: [lineRef] });
+        } else {
+          const existing = stopsById.get(key);
+          if (!existing.lines.includes(route.line)) {
+            existing.lines.push(route.line);
+          }
+          if (!existing.lineRefs?.some((ref) => ref.line === lineRef.line && ref.type === lineRef.type)) {
+            existing.lineRefs = [...(existing.lineRefs || []), lineRef];
+          }
         }
-        if (!existing.lineRefs?.some((ref) => ref.line === lineRef.line && ref.type === lineRef.type)) {
-          existing.lineRefs = [...(existing.lineRefs || []), lineRef];
-        }
-      }
+      });
     });
-  });
 
   state.mapStops = [...stopsById.values()];
   renderMapStops();
@@ -4372,10 +4320,6 @@ function vehicleIcon(vehicle, risk) {
 
 function vehicleModeSymbolHtml(type = activeTransportType()) {
   const normalizedType = sanitizeTransportType(type);
-  if (normalizedType === 'train') {
-    return '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="14" rx="3"></rect><path d="M8 17l-2 4"></path><path d="M16 17l2 4"></path><path d="M8 8h8"></path><path d="M8 12h8"></path></svg>';
-  }
-
   if (normalizedType === 'tram') {
     return '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="3" width="12" height="13" rx="3"></rect><path d="M9 16l-2 4"></path><path d="M15 16l2 4"></path><path d="M9 8h6"></path><path d="M9 12h.01"></path><path d="M15 12h.01"></path></svg>';
   }
@@ -4388,12 +4332,10 @@ function renderVehicleList() {
     return;
   }
 
-  const visibleVehicles = state.vehicles.filter((vehicle) => vehicleTransportType(vehicle) === activeTransportType());
+  const visibleVehicles = state.vehicles.filter(isVehiclePanelVisible);
 
   if (visibleVehicles.length === 0) {
-    const message = activeTransportType() === 'train'
-      ? 'Rongide reaalaja GPS ei ole saadaval'
-      : `Selle liini ${transportLabel()}i ei leitud`;
+    const message = `Selle liini ${transportLabel()}i ei leitud`;
     els.vehicleList.innerHTML = `<div class="empty-state">${escapeHtml(message)}</div>`;
     return;
   }
@@ -4654,12 +4596,17 @@ function renderScheduleRouteHighlight(route, selectedDeparture = null) {
     return;
   }
 
+  const routeType = routeTransportType(route);
+  const emphasis = lineMapOpacity(route.line, routeType) * transportMapOpacity(routeType);
+  if (emphasis <= 0) {
+    return;
+  }
+
   const points = scheduleRouteHighlightPoints(route);
   if (points.length < 2) {
     return;
   }
 
-  const routeType = routeTransportType(route);
   const color = routeColor(route.line, routeType);
   const segments = routeLineSegments(points);
   const label = selectedDeparture
@@ -4671,7 +4618,7 @@ function renderScheduleRouteHighlight(route, selectedDeparture = null) {
       pane: 'scheduleRoutePane',
       color: state.theme === 'dark' ? '#0b1117' : '#ffffff',
       weight: 10,
-      opacity: 0.82,
+      opacity: 0.82 * emphasis,
       lineCap: 'round',
       lineJoin: 'round',
       interactive: false,
@@ -4681,7 +4628,7 @@ function renderScheduleRouteHighlight(route, selectedDeparture = null) {
       pane: 'scheduleRoutePane',
       color,
       weight: 5,
-      opacity: 0.92,
+      opacity: 0.92 * emphasis,
       lineCap: 'round',
       lineJoin: 'round',
       dashArray: routeDirectionIndex(route) % 2 === 1 ? '1 12' : null,
@@ -4785,10 +4732,7 @@ async function fetchDepartures(stop) {
 function renderDepartures() {
   const departures = state.departures.filter((departure) => departureTransportType(departure) === activeTransportType());
   if (departures.length === 0) {
-    const emptyText = activeTransportType() === 'train'
-      ? 'Sellest peatusest rongiväljumisi ei leitud'
-      : 'Väljumisi ei ole';
-    els.departures.innerHTML = `<div class="empty-state">${escapeHtml(emptyText)}</div>`;
+    els.departures.innerHTML = '<div class="empty-state">Väljumisi ei ole</div>';
     return;
   }
 
@@ -4813,15 +4757,6 @@ function renderDepartures() {
 }
 
 async function fetchScheduleLines() {
-  if (activeTransportType() === 'train') {
-    state.scheduleAvailableLines = [];
-    renderScheduleLineOptions();
-    if (els.scheduleSummary) {
-      els.scheduleSummary.textContent = 'Rongid peatuse tabloos';
-    }
-    return;
-  }
-
   try {
     const data = await fetchJson(`api.html?action=lines&type=${encodeURIComponent(activeTransportType())}`);
     state.scheduleAvailableLines = Array.isArray(data.lines)
@@ -4847,13 +4782,6 @@ function renderScheduleLineOptions() {
   }
 
   const currentLine = normalizeLine(state.scheduleLine || state.selectedLines[0] || defaultLinesForTransport()[0] || '');
-  if (activeTransportType() === 'train') {
-    els.scheduleLineSelect.innerHTML = '<option value="">Rongipeatusest</option>';
-    els.scheduleLineSelect.value = '';
-    els.scheduleLineSelect.disabled = true;
-    return;
-  }
-
   const lines = uniqueSortedLines([
     ...state.selectedLines,
     ...state.scheduleAvailableLines,
@@ -4892,11 +4820,6 @@ function selectScheduleLine(value) {
 }
 
 async function fetchSchedule() {
-  if (activeTransportType() === 'train') {
-    renderScheduleEmpty('Rongide detailne sõiduplaan pole selles andmeallikas saadaval. Vali rongipeatus peatuse tabloost, et näha lähimaid rongiväljumisi.');
-    return;
-  }
-
   const line = normalizeLine(state.scheduleLine || state.selectedLines[0] || defaultLinesForTransport()[0] || '');
   if (!line) {
     renderScheduleEmpty('Vali liin');
@@ -5933,7 +5856,7 @@ async function fetchWeather() {
     return;
   }
   state.lastWeatherFetch = now;
-  const url = 'https://api.open-meteo.com/v1/forecast?latitude=59.437&longitude=24.7536&current=temperature_2m,precipitation,weather_code,wind_speed_10m&hourly=precipitation_probability&forecast_days=1&timezone=Europe%2FTallinn';
+  const url = 'https://api.open-meteo.com/v1/forecast?latitude=59.437&longitude=24.7536&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,rain,showers,snowfall,weather_code,cloud_cover,pressure_msl,wind_speed_10m,wind_direction_10m,wind_gusts_10m&hourly=temperature_2m,apparent_temperature,precipitation_probability,precipitation,weather_code,wind_speed_10m,wind_gusts_10m&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,wind_speed_10m_max,wind_gusts_10m_max,sunrise,sunset&forecast_days=3&wind_speed_unit=ms&timezone=Europe%2FTallinn';
 
   try {
     const response = await fetch(url, { cache: 'no-store' });
@@ -5943,33 +5866,246 @@ async function fetchWeather() {
   } catch (error) {
     els.weatherText.textContent = 'Ilm puudub';
     els.walkingAdvice.textContent = error.message;
+    if (els.weatherMetrics) els.weatherMetrics.innerHTML = '';
+    if (els.weatherForecast) els.weatherForecast.innerHTML = '';
   }
 }
 
 function renderWeather(data) {
   const current = data.current || {};
-  const temp = Math.round(current.temperature_2m);
-  const wind = Math.round(current.wind_speed_10m || 0);
+  const hourly = data.hourly || {};
+  const daily = data.daily || {};
+  const hourIndex = weatherHourIndex(hourly, current.time);
+  const nextHours = nextWeatherHours(hourly, hourIndex, 6);
+  const temp = roundWeatherValue(current.temperature_2m);
+  const feelsLike = roundWeatherValue(current.apparent_temperature);
+  const wind = roundWindValue(current.wind_speed_10m) || 0;
+  const gust = roundWindValue(current.wind_gusts_10m) || maxWindValue(nextHours.map((hour) => hour.gust), 0);
+  const humidity = roundWeatherValue(current.relative_humidity_2m);
+  const pressure = roundWeatherValue(current.pressure_msl);
+  const cloudCover = roundWeatherValue(current.cloud_cover);
+  const windDirection = windDirectionText(current.wind_direction_10m);
   const precipitation = Number(current.precipitation || 0);
   const code = Number(current.weather_code || 0);
-  state.weather = { temp, wind, precipitation, code };
+  const precipitationProbability = maxWeatherValue(nextHours.map((hour) => hour.precipitationProbability), 0);
+  const nextPrecipitation = sumWeatherValue(nextHours.map((hour) => hour.precipitation));
+  state.weather = {
+    temp,
+    wind,
+    precipitation,
+    code,
+    feelsLike,
+    gust,
+    humidity,
+    pressure,
+    precipitationProbability,
+  };
   const weatherText = weatherCodeText(code);
-  const advice = walkingText(temp, wind, precipitation, code);
+  const advice = weatherTravelAdvice({
+    temp,
+    feelsLike,
+    wind,
+    gust,
+    precipitation,
+    precipitationProbability,
+    nextPrecipitation,
+    code,
+  });
 
-  els.weatherTemp.textContent = `${temp}°C`;
-  els.weatherText.textContent = `${weatherText}, tuul ${wind} km/h`;
+  els.weatherTemp.textContent = formatTemperature(temp);
+  els.weatherText.textContent = `${weatherText}, tundub ${formatTemperature(feelsLike ?? temp)}`;
   els.walkingAdvice.textContent = advice;
+  renderWeatherMetrics({
+    precipitationProbability,
+    nextPrecipitation,
+    wind,
+    gust,
+    windDirection,
+    humidity,
+    pressure,
+    cloudCover,
+  });
+  renderWeatherForecast(daily);
   els.weatherUpdated.textContent = timeNow();
 }
 
-function walkingText(temp, wind, precipitation, code) {
-  if (precipitation > 0.4 || TRANSFER_WEATHER_CODES_SLOW.includes(code)) {
-    return `${transportTitleLabel()} on mugavam valik`;
+function renderWeatherMetrics(weather) {
+  if (!els.weatherMetrics) {
+    return;
   }
-  if (wind > 30 || temp < -8) {
+
+  const rainValue = `${weather.precipitationProbability}% / ${formatMillimeters(weather.nextPrecipitation)}`;
+  const windValue = `${formatWindSpeed(weather.wind)}${weather.windDirection ? ` ${weather.windDirection}` : ''}`;
+  const gustValue = formatWindSpeed(weather.gust);
+  const pressureValue = Number.isFinite(weather.pressure) ? `${weather.pressure} hPa` : '-';
+  const metrics = [
+    { label: 'Sadu 6 h', value: rainValue, detail: 'tõenäosus ja kogus' },
+    { label: 'Tuul', value: windValue, detail: `puhang ${gustValue}` },
+    { label: 'Niiskus', value: Number.isFinite(weather.humidity) ? `${weather.humidity}%` : '-', detail: 'õhuniiskus' },
+    { label: 'Pilvisus', value: Number.isFinite(weather.cloudCover) ? `${weather.cloudCover}%` : '-', detail: pressureValue },
+  ];
+
+  els.weatherMetrics.innerHTML = metrics.map((item) => `
+    <span class="weather-metric">
+      <small>${escapeHtml(item.label)}</small>
+      <strong>${escapeHtml(item.value)}</strong>
+      <em>${escapeHtml(item.detail)}</em>
+    </span>
+  `).join('');
+}
+
+function renderWeatherForecast(daily) {
+  if (!els.weatherForecast) {
+    return;
+  }
+
+  const rows = weatherDailyRows(daily);
+  if (rows.length === 0) {
+    els.weatherForecast.innerHTML = '';
+    return;
+  }
+
+  els.weatherForecast.innerHTML = rows.map((day, index) => `
+    <div class="weather-day">
+      <strong>${escapeHtml(forecastDayLabel(day.time, index))}</strong>
+      <span>
+        <b>${escapeHtml(weatherCodeText(day.code))}</b>
+        <small>${escapeHtml(formatTemperature(day.min))} kuni ${escapeHtml(formatTemperature(day.max))}</small>
+      </span>
+      <em>${escapeHtml(day.precipitationProbability)}% · ${escapeHtml(formatMillimeters(day.precipitationSum))} · ${escapeHtml(formatWindSpeed(day.windMax))}</em>
+    </div>
+  `).join('');
+}
+
+function weatherDailyRows(daily) {
+  const times = Array.isArray(daily.time) ? daily.time : [];
+  return times.slice(0, 3).map((time, index) => ({
+    time,
+    code: numberAt(daily.weather_code, index, 0),
+    max: numberAt(daily.temperature_2m_max, index, null),
+    min: numberAt(daily.temperature_2m_min, index, null),
+    precipitationSum: numberAt(daily.precipitation_sum, index, 0),
+    precipitationProbability: Math.round(numberAt(daily.precipitation_probability_max, index, 0)),
+    windMax: roundWindValue(numberAt(daily.wind_speed_10m_max, index, 0)),
+  }));
+}
+
+function weatherTravelAdvice({ temp, feelsLike, wind, gust, precipitation, precipitationProbability, nextPrecipitation, code }) {
+  const felt = Number.isFinite(feelsLike) ? feelsLike : temp;
+  if (precipitation > 0.4 || nextPrecipitation >= 1 || precipitationProbability >= 70 || TRANSFER_WEATHER_CODES_SLOW.includes(code)) {
+    return `${transportTitleLabel()} on kindlam valik, sademete risk on kõrge`;
+  }
+  if (gust >= 12.5) {
+    return `Arvesta tuulepuhangutega kuni ${formatWindSpeed(gust)}`;
+  }
+  if (Number.isFinite(felt) && felt <= -10) {
+    return 'Tajutavalt väga külm, hoia jalgsi ots lühike';
+  }
+  if (wind > 8.5 || temp < -8) {
     return 'Jalgsi pigem lühike ots';
   }
+  if (precipitationProbability >= 40) {
+    return `Vihmavõimalus ${precipitationProbability}%, võta väike ajavaru`;
+  }
   return 'Jalgsi liikumine on mõistlik';
+}
+
+function weatherHourIndex(hourly, currentTime) {
+  const times = Array.isArray(hourly.time) ? hourly.time : [];
+  if (times.length === 0) {
+    return 0;
+  }
+
+  const target = String(currentTime || '').slice(0, 13);
+  const index = times.findIndex((time) => String(time).slice(0, 13) >= target);
+  return index >= 0 ? index : 0;
+}
+
+function nextWeatherHours(hourly, startIndex, count) {
+  const times = Array.isArray(hourly.time) ? hourly.time : [];
+  const start = clampNumber(Number(startIndex) || 0, 0, Math.max(0, times.length - 1));
+  return times.slice(start, start + count).map((time, offset) => {
+    const index = start + offset;
+    return {
+      time,
+      precipitationProbability: numberAt(hourly.precipitation_probability, index, 0),
+      precipitation: numberAt(hourly.precipitation, index, 0),
+      gust: numberAt(hourly.wind_gusts_10m, index, 0),
+    };
+  });
+}
+
+function numberAt(values, index, fallback = null) {
+  const value = Array.isArray(values) ? Number(values[index]) : NaN;
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function roundWeatherValue(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.round(number) : null;
+}
+
+function roundWindValue(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.round(number * 10) / 10 : null;
+}
+
+function maxWeatherValue(values, fallback = null) {
+  const numbers = values.map(Number).filter(Number.isFinite);
+  return numbers.length ? Math.round(Math.max(...numbers)) : fallback;
+}
+
+function maxWindValue(values, fallback = null) {
+  const numbers = values.map(Number).filter(Number.isFinite);
+  return numbers.length ? roundWindValue(Math.max(...numbers)) : fallback;
+}
+
+function sumWeatherValue(values) {
+  return values.map(Number).filter(Number.isFinite).reduce((total, value) => total + value, 0);
+}
+
+function formatTemperature(value) {
+  return Number.isFinite(Number(value)) ? `${Math.round(Number(value))}°C` : '-';
+}
+
+function formatMillimeters(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) {
+    return '0 mm';
+  }
+
+  return `${number >= 10 ? Math.round(number) : Math.round(number * 10) / 10} mm`;
+}
+
+function formatWindSpeed(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return '-';
+  }
+
+  return `${Number.isInteger(number) ? number : number.toFixed(1)} m/s`;
+}
+
+function forecastDayLabel(value, index) {
+  if (index === 0) return 'Täna';
+  if (index === 1) return 'Homme';
+
+  const date = new Date(`${value}T12:00:00`);
+  if (Number.isNaN(date.getTime())) {
+    return String(value || '');
+  }
+
+  return new Intl.DateTimeFormat('et-EE', { weekday: 'short' }).format(date);
+}
+
+function windDirectionText(degrees) {
+  const value = Number(degrees);
+  if (!Number.isFinite(value)) {
+    return '';
+  }
+
+  const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+  return directions[Math.round(value / 45) % directions.length];
 }
 
 function weatherCodeText(code) {
@@ -5992,7 +6128,11 @@ function weatherCodeText(code) {
     80: 'Vihmahood',
     81: 'Tugevad vihmahood',
     82: 'Paduvihm',
+    85: 'Lumehood',
+    86: 'Tugevad lumehood',
     95: 'Äike',
+    96: 'Äike ja rahe',
+    99: 'Tugev äike ja rahe',
   };
   return labels[code] || 'Muutlik';
 }
@@ -6000,8 +6140,10 @@ function weatherCodeText(code) {
 function renderDelayPanel() {
   const lateDepartures = state.departures
     .filter((departure) => departureTransportType(departure) === activeTransportType())
+    .filter((departure) => lineMapOpacity(departure.line, departureTransportType(departure)) > 0)
     .filter((departure) => departure.delaySeconds >= 120);
   const riskyVehicles = state.vehicles
+    .filter(isVehiclePanelVisible)
     .map((vehicle) => ({ vehicle, risk: vehicleDelayRisk(vehicle) }))
     .filter((item) => item.risk.level !== 'low');
   const highCount = riskyVehicles.filter((item) => item.risk.level === 'high').length
@@ -6584,11 +6726,6 @@ function vehicleFactIconHtml(icon) {
 }
 
 function renderLineTags() {
-  if (activeTransportType() === 'train') {
-    els.selectedLines.innerHTML = '<span class="empty-tag">Rongide väljumised kuvatakse valitud peatuse tabloos</span>';
-    return;
-  }
-
   if (state.selectedLines.length === 0) {
     els.selectedLines.innerHTML = `<span class="empty-tag">Ühtegi ${transportLineLabel().toLocaleLowerCase('et')}i pole valitud</span>`;
     return;
@@ -6647,56 +6784,122 @@ function renderLineTags() {
   });
 
   els.selectedLines.querySelectorAll('.line-emphasis-input').forEach((input) => {
-    input.addEventListener('input', () => {
-      updateLineEmphasis(input);
-    });
+    bindLineEmphasisInput(input);
   });
 
   lucide.createIcons();
 }
 
-function updateLineColor(input) {
-  const line = input.dataset.line;
-  const type = sanitizeTransportType(input.dataset.transportType || activeTransportType());
-  const color = input.value;
-  if (!line || !isHexColor(color)) {
+function bindLineEmphasisInput(input) {
+  input.addEventListener('pointerdown', (event) => {
+    startLineEmphasisPointer(input, event);
+  });
+
+  input.addEventListener('pointermove', (event) => {
+    updateLineEmphasisPointer(input, event);
+  });
+
+  input.addEventListener('pointerup', () => {
+    finishLineEmphasisPointer(input);
+  });
+
+  input.addEventListener('pointercancel', () => {
+    cancelLineEmphasisPointer(input);
+  });
+
+  input.addEventListener('input', () => {
+    handleLineEmphasisInput(input);
+  });
+}
+
+function startLineEmphasisPointer(input, event) {
+  if (event.pointerType !== 'touch' && event.pointerType !== 'pen') {
     return;
   }
 
-  state.lineColors[lineStateKey(line, type)] = color;
-  saveLineColors();
-  syncLineColorControls(line, type, color);
-  refreshColoredLayers(false);
+  input.dataset.touchIntent = 'pending';
+  input.dataset.touchStartX = String(event.clientX);
+  input.dataset.touchStartY = String(event.clientY);
+  input.dataset.touchStartValue = input.value;
 }
 
-function syncLineColorControls(line, type, color) {
-  const lineSelector = `[data-line="${cssString(line)}"][data-transport-type="${cssString(sanitizeTransportType(type))}"]`;
-  document.querySelectorAll(lineSelector).forEach((element) => {
-    if (element.classList.contains('line-control-row')) {
-      element.style.setProperty('--line-color', color);
-    }
+function updateLineEmphasisPointer(input, event) {
+  if (!input.dataset.touchIntent || input.dataset.touchIntent === 'drag') {
+    return;
+  }
 
-    if (element.classList.contains('line-emphasis-input')) {
-      applyLineSliderStyle(element, color, Number(element.value));
-    }
+  const startX = Number(input.dataset.touchStartX);
+  const startY = Number(input.dataset.touchStartY);
+  if (!Number.isFinite(startX) || !Number.isFinite(startY)) {
+    return;
+  }
 
-    if (element.classList.contains('route-badge')) {
-      element.style.setProperty('--badge-color', color);
-    }
+  const dx = Math.abs(event.clientX - startX);
+  const dy = Math.abs(event.clientY - startY);
+  if (dy >= 8 && dy > dx * 1.25) {
+    input.dataset.touchIntent = 'scroll';
+    restoreLineEmphasisTouchValue(input);
+    input.blur();
+    return;
+  }
 
-    if (element.matches('input[type="color"]')) {
-      element.value = color;
-      const row = element.closest('.line-control-row');
-      if (row) {
-        row.style.setProperty('--line-color', color);
-      }
+  if (dx >= 10 && dx > dy * 1.15) {
+    input.dataset.touchIntent = 'drag';
+    updateLineEmphasis(input);
+  }
+}
 
-      const badge = row?.querySelector('.route-badge');
-      if (badge) {
-        badge.style.setProperty('--badge-color', color);
-      }
-    }
-  });
+function finishLineEmphasisPointer(input) {
+  const intent = input.dataset.touchIntent;
+  if (!intent) {
+    return;
+  }
+
+  if (intent !== 'drag') {
+    restoreLineEmphasisTouchValue(input);
+    input.dataset.touchSuppressUntil = String(Date.now() + 350);
+  }
+
+  clearLineEmphasisTouchState(input);
+}
+
+function cancelLineEmphasisPointer(input) {
+  if (input.dataset.touchIntent) {
+    restoreLineEmphasisTouchValue(input);
+  }
+
+  clearLineEmphasisTouchState(input);
+}
+
+function handleLineEmphasisInput(input) {
+  const suppressUntil = Number(input.dataset.touchSuppressUntil || 0);
+  const intent = input.dataset.touchIntent || '';
+  if (Date.now() < suppressUntil || intent === 'pending' || intent === 'scroll') {
+    restoreLineEmphasisTouchValue(input);
+    return;
+  }
+
+  updateLineEmphasis(input);
+}
+
+function restoreLineEmphasisTouchValue(input) {
+  const line = input.dataset.line;
+  const type = sanitizeTransportType(input.dataset.transportType || activeTransportType());
+  const startValue = Number(input.dataset.touchStartValue);
+  const value = Number.isFinite(startValue) ? startValue : Math.round(lineEmphasis(line || '', type) * 100);
+  input.value = String(value);
+  if (line) {
+    syncLineEmphasisControls(line, type, value / 100);
+  } else {
+    applyLineSliderStyle(input, routeColor('', type), value);
+  }
+}
+
+function clearLineEmphasisTouchState(input) {
+  delete input.dataset.touchIntent;
+  delete input.dataset.touchStartX;
+  delete input.dataset.touchStartY;
+  delete input.dataset.touchStartValue;
 }
 
 function updateLineEmphasis(input) {
@@ -6748,11 +6951,11 @@ function lineSliderVariables(color, value) {
 }
 
 function lineSliderShellStyle(color, value) {
-  return `${lineSliderVariables(color, value)} position: relative; width: 100%; min-width: 0; height: 22px; display: block;`;
+  return `${lineSliderVariables(color, value)} position: relative; width: 100%; min-width: 0; height: 22px; display: block; touch-action: pan-y;`;
 }
 
 function lineSliderInputStyle(color, value) {
-  return `${lineSliderVariables(color, value)} position: absolute; inset: 0; z-index: 3; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; background: transparent; border: 0; border-radius: 999px; outline: none; -webkit-appearance: none; appearance: none;`;
+  return `${lineSliderVariables(color, value)} position: absolute; inset: 0; z-index: 3; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; background: transparent; border: 0; border-radius: 999px; outline: none; -webkit-appearance: none; appearance: none; touch-action: pan-y;`;
 }
 
 function lineSliderTrackStyle(color) {
@@ -6780,12 +6983,59 @@ function refreshColoredLayers(renderControls = true) {
   renderVehicles();
   renderDepartures();
   renderDelayPanel();
+  refreshScheduleRouteHighlight();
 }
 
 function refreshLineEmphasis() {
   renderRoutes();
-  renderMapStops();
+  renderRouteStops();
   renderVehicles();
+  renderDelayPanel();
+  refreshScheduleRouteHighlight();
+}
+
+function updateLineColor(input) {
+  const line = input.dataset.line;
+  const type = sanitizeTransportType(input.dataset.transportType || activeTransportType());
+  const color = input.value;
+  if (!line || !isHexColor(color)) {
+    return;
+  }
+
+  state.lineColors[lineStateKey(line, type)] = color;
+  saveLineColors();
+  syncLineColorControls(line, type, color);
+  refreshColoredLayers(false);
+}
+
+function syncLineColorControls(line, type, color) {
+  const lineSelector = `[data-line="${cssString(line)}"][data-transport-type="${cssString(sanitizeTransportType(type))}"]`;
+  document.querySelectorAll(lineSelector).forEach((element) => {
+    if (element.classList.contains('line-control-row')) {
+      element.style.setProperty('--line-color', color);
+    }
+
+    if (element.classList.contains('line-emphasis-input')) {
+      applyLineSliderStyle(element, color, Number(element.value));
+    }
+
+    if (element.classList.contains('route-badge')) {
+      element.style.setProperty('--badge-color', color);
+    }
+
+    if (element.matches('input[type="color"]')) {
+      element.value = color;
+      const row = element.closest('.line-control-row');
+      if (row) {
+        row.style.setProperty('--line-color', color);
+      }
+
+      const badge = row?.querySelector('.route-badge');
+      if (badge) {
+        badge.style.setProperty('--badge-color', color);
+      }
+    }
+  });
 }
 
 function updateUserLocation(position, { center = false } = {}) {
@@ -7182,21 +7432,6 @@ function routeColor(line, type = activeTransportType()) {
     }
   }
 
-  if (normalizedType === 'train') {
-    const trainPreferred = {
-      A: '#2563eb',
-      R: '#2563eb',
-      RE: '#2563eb',
-      ELR: '#2563eb',
-    };
-
-    if (Object.prototype.hasOwnProperty.call(trainPreferred, text)) {
-      return trainPreferred[text];
-    }
-
-    return '#2563eb';
-  }
-
   const preferred = {
     18: '#16a34a',
     40: '#0284c7',
@@ -7286,16 +7521,16 @@ function registerServiceWorker() {
   if ('serviceWorker' in navigator) {
     let reloadedForWorker = false;
     navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (reloadedForWorker || sessionStorage.getItem('bussradar.swReloaded') === '184') {
+      if (reloadedForWorker || sessionStorage.getItem('bussradar.swReloaded') === '191') {
         return;
       }
 
       reloadedForWorker = true;
-      sessionStorage.setItem('bussradar.swReloaded', '184');
+      sessionStorage.setItem('bussradar.swReloaded', '191');
       window.location.reload();
     });
 
-    navigator.serviceWorker.register('service-worker.js?v=184').then((registration) => {
+    navigator.serviceWorker.register('service-worker.js?v=191').then((registration) => {
       registration.update?.();
 
       if (registration.waiting) {

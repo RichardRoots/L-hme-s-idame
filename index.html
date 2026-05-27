@@ -9,6 +9,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="BussRadar">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="msapplication-TileColor" content="#0f5e62">
   <meta name="format-detection" content="telephone=no">
   <meta name="referrer" content="strict-origin-when-cross-origin">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; worker-src 'self'; manifest-src 'self'; script-src 'self' https://unpkg.com; style-src 'self' 'unsafe-inline' https://unpkg.com; connect-src 'self' https://transport.tallinn.ee https://api.open-meteo.com https://r.jina.ai https://api.allorigins.win; img-src 'self' data: https://unpkg.com https://tile.openstreetmap.org https://*.basemaps.cartocdn.com;">
@@ -17,10 +18,11 @@
   <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
   <link rel="icon" href="assets/favicon-32.png" sizes="32x32" type="image/png">
   <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png">
   <link rel="preconnect" href="https://unpkg.com">
   <link rel="preconnect" href="https://tile.openstreetmap.org">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="assets/css/styles.css?v=184">
+  <link rel="stylesheet" href="assets/css/styles.css?v=191">
 </head>
 <body>
   <div class="app-shell">
@@ -151,7 +153,7 @@
           </div>
         </section>
 
-        <section class="panel-block">
+        <section class="panel-block" hidden>
           <div class="block-heading">
             <h2>Peatuse tablo</h2>
             <span id="selectedStopName">Laikmaa</span>
@@ -201,6 +203,8 @@
             <span id="weatherText">Laen ilma</span>
           </div>
           <div class="weather-detail" id="walkingAdvice">-</div>
+          <div class="weather-metrics" id="weatherMetrics"></div>
+          <div class="weather-forecast" id="weatherForecast"></div>
         </section>
 
         <section class="panel-block compact-block">
@@ -230,7 +234,7 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
-  <script src="assets/js/static-api.js?v=184"></script>
-  <script src="assets/js/app.js?v=184" defer></script>
+  <script src="assets/js/static-api.js?v=191"></script>
+  <script src="assets/js/app.js?v=191" defer></script>
 </body>
 </html>

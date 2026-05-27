@@ -205,18 +205,8 @@ button {
   background: color-mix(in srgb, #f97316 13%, var(--panel));
 }
 
-.mode-toggle-button.is-train-next {
-  color: #1d4ed8;
-  border-color: color-mix(in srgb, #2563eb 46%, var(--line));
-  background: color-mix(in srgb, #2563eb 10%, var(--panel));
-}
-
 .mode-toggle-button.is-active svg {
   color: #ea580c;
-}
-
-.mode-toggle-button.is-train-next svg {
-  color: #2563eb;
 }
 
 .status-pill {
@@ -985,6 +975,7 @@ body.is-live-refreshing .status-pill {
   min-width: 0;
   height: 22px;
   display: block;
+  touch-action: pan-y;
 }
 
 .line-slider-track {
@@ -1043,6 +1034,7 @@ body.is-live-refreshing .status-pill {
   box-shadow: none;
   opacity: 0;
   outline: none;
+  touch-action: pan-y;
 }
 
 .line-opacity-control input[type="range"]::-webkit-slider-runnable-track {
@@ -2249,6 +2241,87 @@ body.is-live-refreshing .status-pill {
   margin-top: 7px;
 }
 
+.weather-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 10px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
+}
+
+.weather-metric {
+  min-width: 0;
+  display: block;
+}
+
+.weather-metric small,
+.weather-metric em,
+.weather-day small,
+.weather-day em {
+  color: var(--muted);
+  font-style: normal;
+}
+
+.weather-metric small,
+.weather-metric strong,
+.weather-metric em {
+  display: block;
+}
+
+.weather-metric small {
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.weather-metric strong {
+  margin-top: 2px;
+  font-size: 0.94rem;
+}
+
+.weather-metric em {
+  margin-top: 1px;
+  font-size: 0.76rem;
+}
+
+.weather-forecast {
+  margin-top: 12px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
+}
+
+.weather-day {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 8px 10px;
+  align-items: start;
+  padding: 9px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 62%, transparent);
+}
+
+.weather-day > strong {
+  font-size: 0.82rem;
+}
+
+.weather-day span {
+  min-width: 0;
+}
+
+.weather-day b,
+.weather-day small {
+  display: block;
+}
+
+.weather-day b {
+  font-size: 0.86rem;
+}
+
+.weather-day em {
+  grid-column: 2;
+  font-size: 0.76rem;
+}
+
 .crowd-item,
 .delay-item {
   padding: 10px;
@@ -2518,10 +2591,6 @@ body.is-live-refreshing .status-pill {
 
 .route-badge.tram {
   background: var(--badge-color, #ea580c);
-}
-
-.route-badge.train {
-  background: var(--badge-color, #2563eb);
 }
 
 .legend-dot.tram {
@@ -4229,12 +4298,6 @@ body.is-live-refreshing .status-pill {
   color: #fed7aa;
   border-color: color-mix(in srgb, #f97316 52%, var(--line));
   background: color-mix(in srgb, #f97316 15%, var(--panel));
-}
-
-:root[data-theme="dark"] .mode-toggle-button.is-train-next {
-  color: #bfdbfe;
-  border-color: color-mix(in srgb, #3b82f6 48%, var(--line));
-  background: color-mix(in srgb, #3b82f6 13%, var(--panel));
 }
 
 :root[data-theme="dark"] .schedule-panel-card,
