@@ -1,5 +1,5 @@
 ﻿{
-  "updatedAt": "2026-06-02T04:54:24.5381099Z",
+  "updatedAt": "2026-06-02T22:30:41.7309754Z",
   "sources": [
     "https://ebus.ee/index.php?a=ps&did=8&v=list",
     "https://ebus.ee/index.php?a=ps&did=13&v=list"
@@ -23,25 +23,6 @@
       "isElectric": false,
       "isArticulated": false,
       "badge": "?"
-    },
-    "1000": {
-      "id": "1000",
-      "registration": "001 TAK",
-      "model": "BMC Procity+ 12M EV",
-      "year": "2025",
-      "factoryNumber": "3",
-      "inServiceSince": "11.2025",
-      "note": "Testimisel",
-      "sourceUrl": "https://ebus.ee/index.php?a=ps&did=8&v=list",
-      "size": "standard",
-      "sizeLabel": "Lühike buss",
-      "lengthMeters": 12,
-      "power": "electric",
-      "powerLabel": "Elektribuss",
-      "powerShort": "elekter",
-      "isElectric": true,
-      "isArticulated": false,
-      "badge": "12"
     },
     "1003": {
       "id": "1003",
