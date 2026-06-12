@@ -1,5 +1,5 @@
 ﻿{
-  "updatedAt": "2026-06-12T12:14:12.1300418Z",
+  "updatedAt": "2026-06-12T22:51:30.8083865Z",
   "sources": [
     "https://ebus.ee/index.php?a=ps&did=8&v=list",
     "https://ebus.ee/index.php?a=ps&did=13&v=list"
@@ -7060,7 +7060,7 @@
       "model": "MAN A78 Lion's City LE EL293",
       "year": "2017",
       "factoryNumber": "1179",
-      "inServiceSince": "04.2022",
+      "inServiceSince": "04.2017",
       "note": "",
       "sourceUrl": "https://ebus.ee/index.php?a=ps&did=13&v=list",
       "size": "standard",
@@ -7212,7 +7212,7 @@
       "model": "MAN A40 Lion's City GL NG323",
       "year": "2017",
       "factoryNumber": "1175",
-      "inServiceSince": "05.2022",
+      "inServiceSince": "04.2017",
       "note": "",
       "sourceUrl": "https://ebus.ee/index.php?a=ps&did=13&v=list",
       "size": "articulated",
@@ -7440,7 +7440,7 @@
       "model": "MAN A78 Lion's City LE EL293",
       "year": "2012",
       "factoryNumber": "1537",
-      "inServiceSince": "04.2022",
+      "inServiceSince": "08.2012",
       "note": "",
       "sourceUrl": "https://ebus.ee/index.php?a=ps&did=13&v=list",
       "size": "standard",
@@ -7459,7 +7459,7 @@
       "model": "MAN A78 Lion's City LE EL293",
       "year": "2012",
       "factoryNumber": "1538",
-      "inServiceSince": "09.2012",
+      "inServiceSince": "09.2022",
       "note": "",
       "sourceUrl": "https://ebus.ee/index.php?a=ps&did=13&v=list",
       "size": "standard",
