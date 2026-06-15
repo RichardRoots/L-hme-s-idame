@@ -1,4 +1,4 @@
-ID;SiriID;Lat;Lng;Stops;Name;Info;Street;Area;City;Pikas2026.2.5;2026.06.11 13:25:30
+ID;SiriID;Lat;Lng;Stops;Name;Info;Street;Area;City;Pikas2026.2.5;2026.06.12 09:27:09
 aid123360;;5957134;2475791;id123360;Aegna;0;0;Tallinna linn, Kesklinn;Harju maakond
 a21302-1;;5928563;2561035;21302-1,21301-1,21310-1,21309-1;Aegviidu;0;0;Anija vald;Harju maakond
 a13407-1;;5941622;2479887;13407-1,13408-1,13413-3,13413-2,13413-1,13513-1,13514-1,13513-2,13515-1,13516-1;Airport;0;0;Tallinna linn, Lasnamäe;Harju maakond
