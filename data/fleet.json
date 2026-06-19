@@ -1,5 +1,5 @@
 ﻿{
-  "updatedAt": "2026-06-18T16:06:57.8214803Z",
+  "updatedAt": "2026-06-19T06:51:54.0511966Z",
   "sources": [
     "https://ebus.ee/index.php?a=ps&did=8&v=list",
     "https://ebus.ee/index.php?a=ps&did=13&v=list"
@@ -8076,6 +8076,25 @@
       "power": "diesel",
       "powerLabel": "Diisel",
       "powerShort": "diisel",
+      "isElectric": false,
+      "isArticulated": false,
+      "badge": "12"
+    },
+    "5057": {
+      "id": "5057",
+      "registration": "i/n 41",
+      "model": "BMC Procity II 12LF CNG",
+      "year": "2026",
+      "factoryNumber": "140",
+      "inServiceSince": "06.2026",
+      "note": "",
+      "sourceUrl": "https://ebus.ee/index.php?a=ps&did=8&v=list",
+      "size": "standard",
+      "sizeLabel": "Lühike buss",
+      "lengthMeters": 12,
+      "power": "cng",
+      "powerLabel": "Gaasibuss",
+      "powerShort": "gaas",
       "isElectric": false,
       "isArticulated": false,
       "badge": "12"
