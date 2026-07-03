@@ -1,5 +1,5 @@
 ﻿{
-  "updatedAt": "2026-07-03T15:19:05.8039603Z",
+  "updatedAt": "2026-07-03T19:43:00.0205188Z",
   "sources": [
     "https://ebus.ee/index.php?a=ps&did=8&v=list",
     "https://ebus.ee/index.php?a=ps&did=13&v=list"
@@ -2044,7 +2044,7 @@
       "model": "BMC Procity II 18LF CNG",
       "year": "2026",
       "factoryNumber": "128",
-      "inServiceSince": "06.2026",
+      "inServiceSince": "07.2026",
       "note": "",
       "sourceUrl": "https://ebus.ee/index.php?a=ps&did=8&v=list",
       "size": "standard",
