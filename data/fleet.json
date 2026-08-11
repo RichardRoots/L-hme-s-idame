@@ -1,5 +1,5 @@
 ﻿{
-  "updatedAt": "2026-08-11T06:34:43.2168260Z",
+  "updatedAt": "2026-08-11T07:49:18.9245664Z",
   "sources": [
     "https://ebus.ee/index.php?a=ps&did=8&v=list",
     "https://ebus.ee/index.php?a=ps&did=13&v=list"
@@ -612,25 +612,6 @@
       "isElectric": false,
       "isArticulated": false,
       "badge": "12"
-    },
-    "1111": {
-      "id": "1111",
-      "registration": "111 TAK",
-      "model": "Ajokki Royal",
-      "year": "1990",
-      "factoryNumber": "845",
-      "inServiceSince": "07.1995",
-      "note": "üle antud AS TAK-Reisid",
-      "sourceUrl": "https://ebus.ee/index.php?a=ps&did=8&v=list",
-      "size": "unknown",
-      "sizeLabel": "Pikkus teadmata",
-      "lengthMeters": null,
-      "power": "diesel",
-      "powerLabel": "Diisel",
-      "powerShort": "diisel",
-      "isElectric": false,
-      "isArticulated": false,
-      "badge": "?"
     },
     "1112": {
       "id": "1112",
