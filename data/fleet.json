@@ -1,5 +1,5 @@
 ﻿{
-  "updatedAt": "2026-08-16T10:13:03.1696260Z",
+  "updatedAt": "2026-08-16T10:39:57.0607765Z",
   "sources": [
     "https://ebus.ee/index.php?a=ps&did=8&v=list",
     "https://ebus.ee/index.php?a=ps&did=13&v=list"
@@ -2687,21 +2687,21 @@
     "1442": {
       "id": "1442",
       "registration": "442 TAK",
-      "model": "Solaris Urbino IV 18 CNG",
-      "year": "2020",
-      "factoryNumber": "22121",
-      "inServiceSince": "08.2020",
+      "model": "Säffle 2000",
+      "year": "1995",
+      "factoryNumber": "8122",
+      "inServiceSince": "10.2008",
       "note": "",
       "sourceUrl": "https://ebus.ee/index.php?a=ps&did=8&v=list",
-      "size": "articulated",
-      "sizeLabel": "Pikk buss",
-      "lengthMeters": 18,
-      "power": "cng",
-      "powerLabel": "Gaasibuss",
-      "powerShort": "gaas",
+      "size": "unknown",
+      "sizeLabel": "Pikkus teadmata",
+      "lengthMeters": null,
+      "power": "diesel",
+      "powerLabel": "Diisel",
+      "powerShort": "diisel",
       "isElectric": false,
-      "isArticulated": true,
-      "badge": "18"
+      "isArticulated": false,
+      "badge": "?"
     },
     "1449": {
       "id": "1449",
