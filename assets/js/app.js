@@ -27,6 +27,22 @@ const ROUTE_SIDE_CENTER_EPS_PX = 18;
 const MAP_STOP_VISIBLE_ZOOM = 12;
 const MAP_STOP_FULL_ZOOM = 14;
 const MAP_STOP_FALLBACK_COLOR = '#063f3d';
+const PLANNER_ROUTE_CACHE_MS = 10 * 60 * 1000;
+const PLANNER_NEAR_STOP_LIMIT = 24;
+const PLANNER_NEAR_STOP_RADIUS_METERS = 1200;
+const PLANNER_TRANSFER_MAX_METERS = 260;
+const PLANNER_MAX_WALK_ONLY_METERS = 1400;
+const PLANNER_OPTION_LIMIT = 4;
+const PLANNER_WALKING_SPEED_METERS_PER_MINUTE = 80;
+const PLANNER_TRANSFER_MINUTES = 4;
+const PLANNER_AVERAGE_WAIT_MINUTES = {
+  bus: 5,
+  tram: 4,
+};
+const PLANNER_TRANSIT_SPEED_METERS_PER_MINUTE = {
+  bus: 310,
+  tram: 330,
+};
 
 const state = {
   map: null,
@@ -39,6 +55,7 @@ const state = {
   scheduleRouteHighlightLayer: null,
   scheduleStopHighlightLayer: null,
   transferStopLayer: null,
+  routePlannerLayer: null,
   favoriteStopLayer: null,
   vehicleMarkers: new Map(),
   mapStopMarkers: new Map(),
@@ -75,6 +92,18 @@ const state = {
     departureError: '',
     departureRequestId: 0,
     popupExpanded: false,
+  },
+  planner: {
+    origin: null,
+    destination: null,
+    result: null,
+    results: [],
+    selectedResultIndex: 0,
+    routes: [],
+    routesTypeKey: '',
+    routesFetchedAt: 0,
+    loadingRoutes: false,
+    requestId: 0,
   },
   schools: [],
   schoolsVisible: false,
@@ -169,6 +198,20 @@ function cacheElements() {
   els.transferTargetDeparture = document.querySelector('#transferTargetDeparture');
   els.transferCalculate = document.querySelector('#transferCalculate');
   els.transferResult = document.querySelector('#transferResult');
+  els.plannerForm = document.querySelector('#plannerForm');
+  els.plannerSummary = document.querySelector('#plannerSummary');
+  els.plannerOriginSearch = document.querySelector('#plannerOriginSearch');
+  els.plannerOriginSearchButton = document.querySelector('#plannerOriginSearchButton');
+  els.plannerOriginResults = document.querySelector('#plannerOriginResults');
+  els.plannerUseLocation = document.querySelector('#plannerUseLocation');
+  els.plannerDestinationSearch = document.querySelector('#plannerDestinationSearch');
+  els.plannerDestinationSearchButton = document.querySelector('#plannerDestinationSearchButton');
+  els.plannerDestinationResults = document.querySelector('#plannerDestinationResults');
+  els.plannerOriginPicked = document.querySelector('#plannerOriginPicked');
+  els.plannerDestinationPicked = document.querySelector('#plannerDestinationPicked');
+  els.plannerSwap = document.querySelector('#plannerSwap');
+  els.plannerClear = document.querySelector('#plannerClear');
+  els.plannerResult = document.querySelector('#plannerResult');
   els.scheduleForm = document.querySelector('#scheduleForm');
   els.scheduleLineSelect = document.querySelector('#scheduleLineSelect');
   els.scheduleLineLabel = document.querySelector('#scheduleLineLabel');
@@ -203,8 +246,7 @@ function createMap() {
 
   state.tileLayer = L.tileLayer(mapTileUrl(state.theme), {
     maxZoom: 19,
-    subdomains: 'abcd',
-    attribution: '&copy; OpenStreetMap &copy; CARTO',
+    attribution: '&copy; OpenStreetMap contributors',
   }).addTo(state.map);
 
   state.map.createPane('routePane');
@@ -214,6 +256,7 @@ function createMap() {
   state.map.createPane('scheduleRoutePane');
   state.map.createPane('scheduleStopPane');
   state.map.createPane('transferStopPane');
+  state.map.createPane('routePlannerPane');
   state.map.createPane('favoriteStopPane');
   state.map.createPane('vehiclePane');
   state.map.getPane('routePane').style.zIndex = 405;
@@ -223,6 +266,7 @@ function createMap() {
   state.map.getPane('scheduleRoutePane').style.zIndex = 570;
   state.map.getPane('scheduleStopPane').style.zIndex = 585;
   state.map.getPane('transferStopPane').style.zIndex = 595;
+  state.map.getPane('routePlannerPane').style.zIndex = 635;
   state.map.getPane('favoriteStopPane').style.zIndex = 560;
   state.map.getPane('vehiclePane').style.zIndex = 690;
 
@@ -233,6 +277,7 @@ function createMap() {
   state.scheduleRouteHighlightLayer = L.layerGroup().addTo(state.map);
   state.scheduleStopHighlightLayer = L.layerGroup().addTo(state.map);
   state.transferStopLayer = L.layerGroup().addTo(state.map);
+  state.routePlannerLayer = L.layerGroup().addTo(state.map);
   state.favoriteStopLayer = L.layerGroup().addTo(state.map);
   state.vehicleLayer = L.layerGroup().addTo(state.map);
 
@@ -849,6 +894,34 @@ function bindEvents() {
     refreshTransferEstimate();
   });
 
+  els.plannerForm?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    handlePlannerSubmit();
+  });
+
+  bindPlannerSearchInput('origin', els.plannerOriginSearch);
+  bindPlannerSearchInput('destination', els.plannerDestinationSearch);
+
+  els.plannerOriginSearchButton?.addEventListener('click', () => {
+    searchPlannerStops('origin');
+  });
+
+  els.plannerDestinationSearchButton?.addEventListener('click', () => {
+    searchPlannerStops('destination');
+  });
+
+  els.plannerUseLocation?.addEventListener('click', () => {
+    usePlannerCurrentLocation();
+  });
+
+  els.plannerSwap?.addEventListener('click', () => {
+    swapPlannerPlaces();
+  });
+
+  els.plannerClear?.addEventListener('click', () => {
+    clearPlanner();
+  });
+
   els.scheduleForm?.addEventListener('submit', (event) => {
     event.preventDefault();
     selectScheduleLine(els.scheduleLineSelect?.value || state.scheduleLine);
@@ -1126,6 +1199,9 @@ function applyTheme(theme) {
   if (state.routeLayer && state.routes.length > 0) {
     renderRoutes();
   }
+  if (state.routePlannerLayer && state.planner.result) {
+    drawPlannerRoute(state.planner.result, { fit: false });
+  }
 
   if (!els.themeToggle) {
     return;
@@ -1141,9 +1217,7 @@ function applyTheme(theme) {
 }
 
 function mapTileUrl(theme) {
-  return theme === 'dark'
-    ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-    : 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
+  return 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 }
 
 function setMapTileTheme(theme) {
@@ -1160,6 +1234,8 @@ function loadInitialData() {
   placeStopMarker(state.selectedStop);
   renderFavoriteStops();
   renderTransferPanel();
+  renderPlannerSelection();
+  renderPlannerResult();
   renderScheduleLineOptions();
   fetchScheduleLines();
   fetchSchedule();
@@ -4540,6 +4616,1337 @@ function renderStopResults(stops) {
   });
 }
 
+async function handlePlannerSubmit() {
+  const originReady = await resolvePlannerTypedPlace('origin');
+  if (!originReady) {
+    renderPlannerMessage('Vali või kirjuta lähtekoht', true);
+    return;
+  }
+
+  const destinationReady = await resolvePlannerTypedPlace('destination');
+  if (!destinationReady) {
+    renderPlannerMessage('Vali või kirjuta sihtkoht', true);
+    return;
+  }
+
+  calculatePlannerRoute();
+}
+
+async function resolvePlannerTypedPlace(kind) {
+  const { input, results } = plannerElementsForKind(kind);
+  const currentPlace = kind === 'destination' ? state.planner.destination : state.planner.origin;
+  const query = input?.value.trim() || '';
+  if (currentPlace && (!query || query === plannerPlaceTitle(currentPlace))) {
+    return true;
+  }
+
+  if (query.length < 2) {
+    return false;
+  }
+
+  if (results) {
+    results.innerHTML = '<div class="empty-state">Otsin...</div>';
+  }
+
+  const lookup = await fetchPlannerPlaceResults(query);
+  if (!lookup.items.length) {
+    if (results) {
+      results.innerHTML = `<div class="empty-state error">${escapeHtml(lookup.message || 'Kohta ei leitud')}</div>`;
+    }
+    return false;
+  }
+
+  const selected = lookup.items[0];
+  setPlannerPlace(kind, selected);
+  if (input) {
+    input.value = plannerPlaceTitle(selected);
+  }
+  if (results) {
+    results.innerHTML = '';
+  }
+  return true;
+}
+
+function bindPlannerSearchInput(kind, input) {
+  if (!input) {
+    return;
+  }
+
+  let searchTimer = null;
+  input.addEventListener('input', () => {
+    handlePlannerPlaceInput(kind);
+    window.clearTimeout(searchTimer);
+
+    const query = input.value.trim();
+    const { results } = plannerElementsForKind(kind);
+    if (query.length < 2) {
+      if (results) {
+        results.innerHTML = '';
+      }
+      return;
+    }
+
+    searchTimer = window.setTimeout(() => {
+      if (input.value.trim() === query) {
+        searchPlannerStops(kind);
+      }
+    }, 260);
+  });
+}
+
+function handlePlannerPlaceInput(kind) {
+  const { input, results } = plannerElementsForKind(kind);
+  const currentPlace = kind === 'destination' ? state.planner.destination : state.planner.origin;
+  if (!input || !currentPlace) {
+    return;
+  }
+
+  if (input.value.trim() === plannerPlaceTitle(currentPlace)) {
+    return;
+  }
+
+  if (kind === 'destination') {
+    state.planner.destination = null;
+  } else {
+    state.planner.origin = null;
+  }
+
+  state.planner.result = null;
+  state.planner.results = [];
+  state.planner.selectedResultIndex = 0;
+  state.routePlannerLayer?.clearLayers();
+  if (results && input.value.trim().length < 2) {
+    results.innerHTML = '';
+  }
+  renderPlannerSelection();
+  renderPlannerResult();
+}
+
+async function searchPlannerStops(kind) {
+  const { input, results } = plannerElementsForKind(kind);
+  if (!input || !results) {
+    return;
+  }
+
+  const query = input.value.trim();
+  if (query.length < 2) {
+    results.innerHTML = '';
+    return;
+  }
+
+  results.innerHTML = '<div class="empty-state">Otsin...</div>';
+  const lookup = await fetchPlannerPlaceResults(query);
+
+  if (input.value.trim() !== query) {
+    return;
+  }
+
+  renderPlannerStopResults(kind, lookup.items, lookup.message);
+}
+
+async function fetchPlannerPlaceResults(query) {
+  const stopParams = new URLSearchParams({ action: 'stops', q: query });
+  const placeParams = new URLSearchParams({ action: 'places', q: query });
+  const placesPromise = plannerSettled(fetchJson(`api.html?${placeParams.toString()}`));
+  const stopsResponse = await plannerSettled(fetchJson(`api.html?${stopParams.toString()}`));
+  const stops = stopsResponse.status === 'fulfilled' ? (stopsResponse.value.stops || []) : [];
+
+  if (stops.length > 0) {
+    const quickPlacesResponse = await plannerOutcomeWithTimeout(placesPromise, 850);
+    const quickPlaces = quickPlacesResponse.status === 'fulfilled'
+      ? (quickPlacesResponse.value.places || [])
+      : [];
+    return {
+      items: plannerMergedPlaceResults(stops, quickPlaces),
+      message: '',
+    };
+  }
+
+  const placesResponse = await placesPromise;
+  const places = placesResponse.status === 'fulfilled' ? (placesResponse.value.places || []) : [];
+  const items = plannerMergedPlaceResults(stops, places);
+  const placeError = placesResponse.status === 'fulfilled'
+    ? placesResponse.value.geocodeError
+    : placesResponse.reason?.message;
+  const stopError = stopsResponse.status === 'rejected' ? stopsResponse.reason?.message : '';
+  const message = items.length > 0
+    ? ''
+    : (placeError || stopError || 'Kohta ei leitud');
+
+  return { items, message };
+}
+
+function plannerSettled(promise) {
+  return Promise.resolve(promise)
+    .then((value) => ({ status: 'fulfilled', value }))
+    .catch((reason) => ({ status: 'rejected', reason }));
+}
+
+function plannerOutcomeWithTimeout(promise, timeoutMs) {
+  return Promise.race([
+    promise,
+    new Promise((resolve) => {
+      window.setTimeout(() => resolve({ status: 'pending' }), timeoutMs);
+    }),
+  ]);
+}
+
+function plannerElementsForKind(kind) {
+  return kind === 'destination'
+    ? { input: els.plannerDestinationSearch, results: els.plannerDestinationResults }
+    : { input: els.plannerOriginSearch, results: els.plannerOriginResults };
+}
+
+function plannerMergedPlaceResults(stops, places) {
+  const seen = new Set();
+  return [...stops, ...places].filter((place) => {
+    const normalized = normalizePlannerPlace(place);
+    if (!isPlannerPlace(normalized)) {
+      return false;
+    }
+
+    const key = normalized.stopId
+      ? `stop:${normalized.stopId}`
+      : `place:${normalized.lat.toFixed(5)},${normalized.lon.toFixed(5)}:${normalizeScheduleText(normalized.name)}`;
+    if (seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  }).slice(0, 18);
+}
+
+function renderPlannerStopResults(kind, places, message = '') {
+  const { input, results } = plannerElementsForKind(kind);
+  if (!results) {
+    return;
+  }
+
+  if (places.length === 0) {
+    const isError = Boolean(message);
+    results.innerHTML = `<div class="empty-state${isError ? ' error' : ''}">${escapeHtml(message || 'Kohta ei leitud')}</div>`;
+    return;
+  }
+
+  results.innerHTML = places.map((place) => `
+    <button class="stop-result planner-stop-result" type="button" data-place-id="${escapeHtml(place.id)}">
+      <strong>${escapeHtml(place.name)}</strong>
+      <span><em>${escapeHtml(plannerPlaceKindLabel(place))}</em>${escapeHtml(plannerPlaceSubtitle(place))}</span>
+    </button>
+  `).join('');
+
+  results.querySelectorAll('.planner-stop-result').forEach((button, index) => {
+    button.addEventListener('click', () => {
+      const place = places[index];
+      setPlannerPlace(kind, place);
+      results.innerHTML = '';
+      if (input) {
+        input.value = plannerPlaceTitle(place);
+      }
+    });
+  });
+}
+
+function setPlannerPlace(kind, place) {
+  const nextPlace = normalizePlannerPlace(place);
+  if (!isPlannerPlace(nextPlace)) {
+    renderPlannerMessage('See koht jääb Tallinna ühistranspordi alast välja', true);
+    return;
+  }
+
+  if (kind === 'destination') {
+    state.planner.destination = nextPlace;
+  } else {
+    state.planner.origin = nextPlace;
+  }
+
+  state.planner.result = null;
+  state.planner.results = [];
+  state.planner.selectedResultIndex = 0;
+  state.routePlannerLayer?.clearLayers();
+  renderPlannerSelection();
+  renderPlannerResult();
+}
+
+function normalizePlannerPlace(place) {
+  const lat = Number(place?.lat);
+  const lon = Number(place?.lon);
+  const fallbackId = Number.isFinite(lat) && Number.isFinite(lon)
+    ? `${lat.toFixed(6)},${lon.toFixed(6)}`
+    : '';
+
+  return {
+    id: String(place?.id || place?.stopId || fallbackId),
+    stopId: String(place?.stopId || ''),
+    siriId: String(place?.siriId || ''),
+    name: String(place?.name || 'Asukoht'),
+    street: String(place?.street || ''),
+    area: String(place?.area || ''),
+    city: String(place?.city || ''),
+    lat,
+    lon,
+    isCoordinate: Boolean(place?.isCoordinate),
+    isPlace: Boolean(place?.isPlace),
+    type: String(place?.type || ''),
+  };
+}
+
+function isPlannerPlace(place) {
+  const lat = Number(place?.lat);
+  const lon = Number(place?.lon);
+  return Boolean(place?.id)
+    && Number.isFinite(lat) && Number.isFinite(lon)
+    && lat >= 59.25 && lat <= 59.65
+    && lon >= 24.35 && lon <= 25.25;
+}
+
+function plannerPlaceTitle(place) {
+  const text = String(place?.name || 'Asukoht');
+  return place?.street ? `${text}, ${place.street}` : text;
+}
+
+function plannerPlaceKindLabel(place) {
+  if (place?.isPlace) {
+    return place.type || 'Koht';
+  }
+
+  return 'Peatus';
+}
+
+function plannerPlaceSubtitle(place) {
+  const details = [
+    place?.street || '',
+    place?.area || '',
+    place?.city || '',
+    !place?.isPlace && place?.id ? `ID ${place.id}` : '',
+  ].filter(Boolean);
+  return details.length > 0 ? ` ${details.join(' · ')}` : '';
+}
+
+function renderPlannerSelection() {
+  if (els.plannerOriginPicked) {
+    const origin = state.planner.origin;
+    els.plannerOriginPicked.textContent = origin ? plannerPlaceTitle(origin) : 'Algus valimata';
+    els.plannerOriginPicked.classList.toggle('is-empty', !origin);
+  }
+
+  if (els.plannerDestinationPicked) {
+    const destination = state.planner.destination;
+    els.plannerDestinationPicked.textContent = destination ? plannerPlaceTitle(destination) : 'Siht valimata';
+    els.plannerDestinationPicked.classList.toggle('is-empty', !destination);
+  }
+
+  if (els.plannerSummary && !state.planner.result) {
+    els.plannerSummary.textContent = state.planner.origin && state.planner.destination ? 'Valmis' : 'Vali peatused';
+  }
+}
+
+function renderPlannerResult(result = state.planner.result) {
+  if (!els.plannerResult) {
+    return;
+  }
+
+  const results = Array.isArray(state.planner.results) && state.planner.results.length > 0
+    ? state.planner.results
+    : (result ? [result] : []);
+  const selectedIndex = clampNumber(state.planner.selectedResultIndex || 0, 0, Math.max(0, results.length - 1));
+  const selectedResult = result || results[selectedIndex] || null;
+
+  if (!selectedResult) {
+    els.plannerResult.innerHTML = '';
+    renderPlannerSelection();
+    return;
+  }
+
+  const transferText = selectedResult.transferCount === 0
+    ? (selectedResult.kind === 'walk' ? 'Jalgsi' : 'Otsetee')
+    : `${selectedResult.transferCount} ümberistumine`;
+  const details = [
+    selectedResult.walkingMeters > 0 ? `Kõnd ${formatPlannerDistance(selectedResult.walkingMeters)}` : '',
+    selectedResult.rideMeters > 0 ? `Sõit ${formatPlannerDistance(selectedResult.rideMeters)}` : '',
+    selectedResult.waitMinutes > 0 ? `Ooteaeg ~${formatPlannerMinutes(selectedResult.waitMinutes)}` : '',
+    plannerTrafficLabel(selectedResult),
+    transferText,
+  ].filter(Boolean);
+
+  if (els.plannerSummary) {
+    els.plannerSummary.textContent = formatPlannerMinutes(selectedResult.totalMinutes);
+  }
+
+  els.plannerResult.innerHTML = `
+    ${results.length > 1 ? `
+      <div class="planner-options" aria-label="Teekonna variandid">
+        ${results.map((option, index) => plannerOptionHtml(option, index, index === selectedIndex, results)).join('')}
+      </div>
+    ` : ''}
+    <article class="planner-card">
+      <div class="planner-card-head">
+        <span class="planner-time">
+          <strong>${escapeHtml(formatPlannerMinutes(selectedResult.totalMinutes))}</strong>
+          <small>${escapeHtml(transferText)}</small>
+        </span>
+        <span>
+          <strong>${escapeHtml(selectedResult.kind === 'walk' ? 'Kõnd on kiireim' : 'Valitud teekond')}</strong>
+          <small>${escapeHtml(details.join(' · '))}</small>
+        </span>
+      </div>
+      <div class="planner-facts">
+        ${plannerFactHtml('clock-3', 'Saabumine', plannerArrivalLabel(selectedResult.totalMinutes))}
+        ${plannerFactHtml('activity', 'Liiklus', plannerTrafficLabel(selectedResult))}
+        ${plannerFactHtml('footprints', 'Kõnd', formatPlannerDistance(selectedResult.walkingMeters))}
+      </div>
+      <ol class="planner-steps">
+        ${selectedResult.steps.map((step, index) => plannerStepHtml(step, index)).join('')}
+      </ol>
+    </article>
+  `;
+  els.plannerResult.querySelectorAll('[data-planner-option]').forEach((button) => {
+    button.addEventListener('click', () => {
+      selectPlannerResult(Number(button.dataset.plannerOption || 0));
+    });
+  });
+  hydrateIcons();
+}
+
+function renderPlannerMessage(message, error = false) {
+  if (!els.plannerResult) {
+    return;
+  }
+
+  els.plannerResult.innerHTML = `<div class="empty-state${error ? ' error' : ''}">${escapeHtml(message)}</div>`;
+  if (els.plannerSummary) {
+    els.plannerSummary.textContent = error ? 'Ei leitud' : 'Teekond';
+  }
+}
+
+function plannerOptionHtml(option, index, active, allOptions) {
+  const label = plannerOptionLabel(option, index, allOptions);
+  const lineSummary = plannerLineSummaryHtml(option);
+  const arrival = plannerArrivalLabel(option.totalMinutes);
+  return `
+    <button class="planner-option${active ? ' is-active' : ''}" type="button" data-planner-option="${index}" aria-pressed="${active ? 'true' : 'false'}">
+      <span>
+        <strong>${escapeHtml(formatPlannerMinutes(option.totalMinutes))}</strong>
+        <small>${escapeHtml(arrival)}</small>
+      </span>
+      <span>
+        <strong>${escapeHtml(label)}</strong>
+        <small>${escapeHtml(plannerOptionMeta(option))}</small>
+      </span>
+      <span class="planner-option-lines">${lineSummary}</span>
+    </button>
+  `;
+}
+
+function plannerLineSummaryHtml(result) {
+  const rideSteps = result.steps.filter((step) => step.type === 'ride');
+  if (rideSteps.length === 0) {
+    return '<span class="planner-line-chip walk">J</span>';
+  }
+
+  return rideSteps.map((step) => {
+    const routeType = routeTransportType(step.route);
+    return `<span class="route-badge mini${routeBadgeModeClass(routeType)}" style="--badge-color: ${routeColor(step.route.line, routeType)}">${escapeHtml(step.route.line)}</span>`;
+  }).join('');
+}
+
+function plannerOptionLabel(option, index, allOptions) {
+  if (index === 0) {
+    return 'Kiireim';
+  }
+
+  if (option.kind === 'walk') {
+    return 'Jalgsi';
+  }
+
+  const minTransfers = Math.min(...allOptions.map((item) => item.transferCount));
+  const minWalk = Math.min(...allOptions.map((item) => item.walkingMeters));
+  if (option.transferCount === minTransfers) {
+    return option.transferCount === 0 ? 'Otsetee' : 'Vähem ümberistumisi';
+  }
+  if (option.walkingMeters <= minWalk + 50) {
+    return 'Vähem kõndi';
+  }
+
+  return 'Alternatiiv';
+}
+
+function plannerOptionMeta(option) {
+  const parts = [
+    option.transferCount === 0 ? (option.kind === 'walk' ? 'jalgsi' : 'otse') : `${option.transferCount} ümberistumine`,
+    `${formatPlannerDistance(option.walkingMeters)} kõndi`,
+    plannerTrafficLabel(option),
+  ];
+  return parts.filter(Boolean).join(' · ');
+}
+
+function plannerFactHtml(icon, label, value) {
+  return `
+    <span>
+      <i data-lucide="${escapeHtml(icon)}"></i>
+      <small>${escapeHtml(label)}</small>
+      <strong>${escapeHtml(value)}</strong>
+    </span>
+  `;
+}
+
+function plannerArrivalLabel(minutesFromNow) {
+  const date = new Date(Date.now() + Math.max(0, Number(minutesFromNow) || 0) * 60 * 1000);
+  return `jõuab ${new Intl.DateTimeFormat('et-EE', { hour: '2-digit', minute: '2-digit' }).format(date)}`;
+}
+
+function plannerTrafficLabel(result) {
+  if (result.kind === 'walk') {
+    return 'Liiklusest vaba';
+  }
+
+  const live = result.steps
+    .filter((step) => step.type === 'ride')
+    .map((step) => step.liveDeparture)
+    .find(Boolean);
+  if (!live) {
+    return 'Plaaniline hinnang';
+  }
+
+  if (Number(live.delayMinutes) >= 2) {
+    return `Hilinemine +${Math.round(live.delayMinutes)} min`;
+  }
+  if (Number(live.delayMinutes) <= -1) {
+    return `${Math.abs(Math.round(live.delayMinutes))} min varem`;
+  }
+
+  return 'Reaalajas';
+}
+
+function selectPlannerResult(index) {
+  const results = state.planner.results || [];
+  if (results.length === 0) {
+    return;
+  }
+
+  state.planner.selectedResultIndex = clampNumber(Number(index), 0, results.length - 1);
+  state.planner.result = results[state.planner.selectedResultIndex];
+  renderPlannerResult(state.planner.result);
+  drawPlannerRoute(state.planner.result);
+}
+
+function plannerStepHtml(step, index) {
+  const number = index + 1;
+  if (step.type === 'ride') {
+    const routeType = routeTransportType(step.route);
+    return `
+      <li class="planner-step ride">
+        <span class="route-badge mini${routeBadgeModeClass(routeType)}" style="--badge-color: ${routeColor(step.route.line, routeType)}">${escapeHtml(step.route.line)}</span>
+        <span>
+          <strong>${escapeHtml(transportTitleLabel(routeType))} ${escapeHtml(step.route.line)}</strong>
+          <small>${escapeHtml(plannerRideStepMeta(step))}</small>
+        </span>
+      </li>
+    `;
+  }
+
+  if (step.type === 'transfer') {
+    const transferLabel = step.meters > 25
+      ? `${formatPlannerDistance(step.meters)} jalgsi`
+      : 'sama peatuse ala';
+    return `
+      <li class="planner-step transfer">
+        <span class="planner-step-icon"><i data-lucide="git-branch"></i></span>
+        <span>
+          <strong>Ümberistumine</strong>
+          <small>${escapeHtml(step.from.name || 'Peatus')} · ${escapeHtml(transferLabel)} · ${escapeHtml(formatPlannerMinutes(step.minutes))}</small>
+        </span>
+      </li>
+    `;
+  }
+
+  return `
+    <li class="planner-step walk">
+      <span class="planner-step-icon">${number}</span>
+      <span>
+        <strong>Kõnni ${escapeHtml(formatPlannerDistance(step.meters))}</strong>
+        <small>${escapeHtml(step.from.name || 'Asukoht')} → ${escapeHtml(step.to.name || 'Peatus')} · ${escapeHtml(formatPlannerMinutes(step.minutes))}</small>
+      </span>
+    </li>
+  `;
+}
+
+function plannerRideStepMeta(step) {
+  const parts = [
+    `${step.from.name || 'Peatus'} → ${step.to.name || 'Peatus'}`,
+    formatPlannerMinutes(step.minutes),
+  ];
+
+  if (step.liveDeparture) {
+    const delay = Number(step.liveDeparture.delayMinutes);
+    const delayText = Number.isFinite(delay) && Math.abs(delay) >= 1
+      ? (delay > 0 ? `+${Math.round(delay)} min` : `${Math.round(delay)} min`)
+      : 'õigeaegne';
+    parts.push(`väljub ${step.liveDeparture.expectedTime}`);
+    parts.push(delayText);
+  }
+
+  return parts.join(' · ');
+}
+
+function usePlannerCurrentLocation() {
+  if (!navigator.geolocation) {
+    renderPlannerMessage('Asukohta ei saa selles brauseris kasutada', true);
+    return;
+  }
+
+  els.plannerUseLocation?.classList.add('is-loading');
+  navigator.geolocation.getCurrentPosition((position) => {
+    els.plannerUseLocation?.classList.remove('is-loading');
+    updateUserLocation(position, { center: true });
+    setPlannerPlace('origin', {
+      id: 'current-location',
+      name: 'Minu asukoht',
+      lat: position.coords.latitude,
+      lon: position.coords.longitude,
+      isCoordinate: true,
+    });
+    if (els.plannerOriginSearch) {
+      els.plannerOriginSearch.value = 'Minu asukoht';
+    }
+  }, (error) => {
+    els.plannerUseLocation?.classList.remove('is-loading');
+    renderPlannerMessage(error.code === 1 || error.code === error.PERMISSION_DENIED ? 'Asukoha luba puudub' : 'Asukohta ei saanud leida', true);
+  }, {
+    enableHighAccuracy: true,
+    timeout: 6500,
+    maximumAge: 0,
+  });
+}
+
+function swapPlannerPlaces() {
+  const origin = state.planner.origin;
+  state.planner.origin = state.planner.destination;
+  state.planner.destination = origin;
+  state.planner.result = null;
+  state.planner.results = [];
+  state.planner.selectedResultIndex = 0;
+  state.routePlannerLayer?.clearLayers();
+
+  if (els.plannerOriginSearch) {
+    els.plannerOriginSearch.value = state.planner.origin ? plannerPlaceTitle(state.planner.origin) : '';
+  }
+  if (els.plannerDestinationSearch) {
+    els.plannerDestinationSearch.value = state.planner.destination ? plannerPlaceTitle(state.planner.destination) : '';
+  }
+  renderPlannerSelection();
+  renderPlannerResult();
+}
+
+function clearPlanner() {
+  state.planner.origin = null;
+  state.planner.destination = null;
+  state.planner.result = null;
+  state.planner.results = [];
+  state.planner.selectedResultIndex = 0;
+  state.routePlannerLayer?.clearLayers();
+  if (els.plannerOriginSearch) els.plannerOriginSearch.value = '';
+  if (els.plannerDestinationSearch) els.plannerDestinationSearch.value = '';
+  if (els.plannerOriginResults) els.plannerOriginResults.innerHTML = '';
+  if (els.plannerDestinationResults) els.plannerDestinationResults.innerHTML = '';
+  renderPlannerSelection();
+  renderPlannerResult();
+}
+
+async function calculatePlannerRoute() {
+  const origin = state.planner.origin;
+  const destination = state.planner.destination;
+  if (!isPlannerPlace(origin) || !isPlannerPlace(destination)) {
+    renderPlannerMessage('Vali algus ja siht', true);
+    return;
+  }
+
+  if (distanceMeters(origin.lat, origin.lon, destination.lat, destination.lon) < 45) {
+    renderPlannerMessage('Algus ja siht on samas kohas', true);
+    return;
+  }
+
+  const requestId = ++state.planner.requestId;
+  renderPlannerMessage('Arvutan...');
+
+  try {
+    const routes = await ensurePlannerRoutes();
+    if (requestId !== state.planner.requestId) {
+      return;
+    }
+
+    const results = buildPlannerRouteOptions(origin, destination, routes);
+    await enrichPlannerResultsWithLiveDepartures(results);
+    results.sort(plannerCandidateSort);
+
+    if (requestId !== state.planner.requestId) {
+      return;
+    }
+
+    if (results.length === 0) {
+      state.planner.result = null;
+      state.planner.results = [];
+      state.planner.selectedResultIndex = 0;
+      state.routePlannerLayer?.clearLayers();
+      renderPlannerMessage('Sobivat teekonda ei leitud', true);
+      return;
+    }
+
+    state.planner.results = results.slice(0, PLANNER_OPTION_LIMIT);
+    state.planner.selectedResultIndex = 0;
+    state.planner.result = state.planner.results[0];
+    renderPlannerResult(state.planner.result);
+    drawPlannerRoute(state.planner.result);
+  } catch (error) {
+    if (requestId === state.planner.requestId) {
+      state.planner.result = null;
+      state.planner.results = [];
+      state.planner.selectedResultIndex = 0;
+      state.routePlannerLayer?.clearLayers();
+      renderPlannerMessage(error.message || 'Teekonna arvutus ebaõnnestus', true);
+    }
+  }
+}
+
+async function ensurePlannerRoutes() {
+  const types = plannerTransportTypes();
+  const typeKey = types.join(',');
+  const now = Date.now();
+  if (state.planner.routes.length > 0
+    && state.planner.routesTypeKey === typeKey
+    && now - state.planner.routesFetchedAt < PLANNER_ROUTE_CACHE_MS) {
+    return state.planner.routes;
+  }
+
+  state.planner.loadingRoutes = true;
+  try {
+    const groups = await Promise.all(types.map(async (type) => {
+      const params = new URLSearchParams({ action: 'plannerRoutes', type });
+      const data = await fetchJson(`api.html?${params.toString()}`);
+      return (data.routes || []).map((route, index) => normalizePlannerRoute(route, index)).filter(Boolean);
+    }));
+
+    state.planner.routes = groups.flat();
+    state.planner.routesTypeKey = typeKey;
+    state.planner.routesFetchedAt = Date.now();
+    return state.planner.routes;
+  } finally {
+    state.planner.loadingRoutes = false;
+  }
+}
+
+function plannerTransportTypes() {
+  return ['bus', 'tram'];
+}
+
+async function enrichPlannerResultsWithLiveDepartures(results) {
+  await Promise.all(results.slice(0, PLANNER_OPTION_LIMIT).map(async (result) => {
+    const firstRide = result.steps.find((step) => step.type === 'ride');
+    if (!firstRide?.from?.id) {
+      return;
+    }
+
+    try {
+      const params = new URLSearchParams({ action: 'departures', stopid: firstRide.from.id });
+      const data = await fetchJson(`api.html?${params.toString()}`);
+      const live = bestPlannerDepartureForRide(firstRide, data.departures || []);
+      if (!live) {
+        return;
+      }
+
+      const estimatedWait = plannerAverageWaitMinutes(routeTransportType(firstRide.route));
+      const liveWait = clampNumber(Number(live.minutesUntil), 0, 90);
+      const delta = liveWait - estimatedWait;
+      firstRide.liveDeparture = live;
+      result.liveDeparture = live;
+      result.waitMinutes = Math.max(0, result.waitMinutes + delta);
+      result.totalMinutes = Math.max(1, result.totalMinutes + delta);
+      result.score = plannerScore(result.totalMinutes, result.walkingMeters, result.transferCount);
+    } catch {
+      // Live väljumine on lisaväärtus; planeerija jääb tööle ka plaanilise hinnanguga.
+    }
+  }));
+}
+
+function bestPlannerDepartureForRide(step, departures) {
+  const routeType = routeTransportType(step.route);
+  const line = normalizeLine(String(step.route.line || ''));
+  const destinationNeedle = normalizeScheduleText(step.to?.name || '');
+  return departures
+    .filter((departure) => departureTransportType(departure) === routeType)
+    .filter((departure) => normalizeLine(String(departure.line || '')) === line)
+    .filter((departure) => Number.isFinite(Number(departure.minutesUntil)) && Number(departure.minutesUntil) >= 0)
+    .map((departure) => {
+      const destination = normalizeScheduleText(departure.destination || '');
+      const destinationScore = destinationNeedle && destination.includes(destinationNeedle) ? -2 : 0;
+      return {
+        minutesUntil: Number(departure.minutesUntil),
+        expectedTime: departure.expectedTime || departure.scheduledTime || '',
+        delayMinutes: Math.round(Number(departure.delaySeconds || 0) / 60),
+        destination: departure.destination || '',
+        score: Number(departure.minutesUntil) + destinationScore,
+      };
+    })
+    .sort((a, b) => a.score - b.score)[0] || null;
+}
+
+function normalizePlannerRoute(route, index = 0) {
+  const line = normalizeLine(String(route?.line || ''));
+  const type = routeTransportType(route);
+  const stops = Array.isArray(route?.stops)
+    ? route.stops.filter(isStopCoordinate).map(normalizeStopForStorage)
+    : [];
+  if (!line || stops.length < 2) {
+    return null;
+  }
+
+  return {
+    ...route,
+    line,
+    type,
+    stops,
+    points: stops.map((stop) => [stop.lat, stop.lon]),
+    plannerKey: `${type}:${line}:${String(route.tag || index)}:${String(route.name || '')}`,
+  };
+}
+
+function buildOptimalPlannerRoute(origin, destination, routes) {
+  return buildPlannerRouteOptions(origin, destination, routes)[0] || null;
+}
+
+function buildPlannerRouteOptions(origin, destination, routes) {
+  const usableRoutes = routes.filter((route) => Array.isArray(route.stops) && route.stops.length >= 2);
+  const uniqueStops = plannerUniqueStops(usableRoutes);
+  const originStops = plannerNearestStops(origin, uniqueStops);
+  const destinationStops = plannerNearestStops(destination, uniqueStops);
+  const candidates = [];
+  const walkMeters = distanceMeters(origin.lat, origin.lon, destination.lat, destination.lon);
+
+  if (walkMeters <= PLANNER_MAX_WALK_ONLY_METERS) {
+    candidates.push(plannerWalkingCandidate(origin, destination, walkMeters));
+  }
+
+  if (originStops.length === 0 || destinationStops.length === 0) {
+    return plannerUniqueCandidates(candidates);
+  }
+
+  const originEntries = plannerRouteEntriesForNearbyStops(usableRoutes, originStops);
+  const destinationEntries = plannerRouteEntriesForNearbyStops(usableRoutes, destinationStops);
+
+  candidates.push(...plannerDirectCandidates(origin, destination, originEntries, destinationEntries));
+  candidates.push(...plannerTransferCandidates(origin, destination, originEntries, destinationEntries));
+
+  return plannerUniqueCandidates(candidates);
+}
+
+function plannerUniqueCandidates(candidates) {
+  const seen = new Set();
+  return candidates
+    .filter((candidate) => Number.isFinite(candidate.score))
+    .sort(plannerCandidateSort)
+    .filter((candidate) => {
+      const signature = plannerCandidateSignature(candidate);
+      if (seen.has(signature)) {
+        return false;
+      }
+      seen.add(signature);
+      return true;
+    })
+    .slice(0, PLANNER_OPTION_LIMIT * 2);
+}
+
+function plannerCandidateSignature(candidate) {
+  const rides = candidate.steps
+    .filter((step) => step.type === 'ride')
+    .map((step) => `${step.route.plannerKey}:${plannerStopKey(step.from)}>${plannerStopKey(step.to)}`);
+  if (rides.length === 0) {
+    return `walk:${candidate.steps.length}:${Math.round(candidate.walkingMeters / 50)}`;
+  }
+
+  return `${candidate.transferCount}:${rides.join('|')}:${Math.round(candidate.walkingMeters / 80)}`;
+}
+
+function plannerUniqueStops(routes) {
+  const stops = new Map();
+  routes.forEach((route) => {
+    route.stops.forEach((stop) => {
+      const key = plannerStopKey(stop);
+      if (key && !stops.has(key)) {
+        stops.set(key, stop);
+      }
+    });
+  });
+  return [...stops.values()];
+}
+
+function plannerNearestStops(place, stops) {
+  return stops
+    .map((stop) => ({
+      stop,
+      distanceMeters: distanceMeters(place.lat, place.lon, stop.lat, stop.lon),
+    }))
+    .filter((entry) => Number.isFinite(entry.distanceMeters))
+    .sort((a, b) => a.distanceMeters - b.distanceMeters)
+    .filter((entry, index) => entry.distanceMeters <= PLANNER_NEAR_STOP_RADIUS_METERS || index < 8)
+    .slice(0, PLANNER_NEAR_STOP_LIMIT);
+}
+
+function plannerRouteEntriesForNearbyStops(routes, nearbyStops) {
+  const entries = [];
+  routes.forEach((route) => {
+    route.stops.forEach((stop, index) => {
+      const nearby = nearbyStops.find((candidate) => plannerStopsMatch(stop, candidate.stop));
+      if (!nearby) {
+        return;
+      }
+
+      entries.push({
+        route,
+        index,
+        stop,
+        walkMeters: nearby.distanceMeters,
+      });
+    });
+  });
+  return entries;
+}
+
+function plannerDirectCandidates(origin, destination, originEntries, destinationEntries) {
+  const byRoute = new Map();
+  destinationEntries.forEach((entry) => {
+    const key = entry.route.plannerKey;
+    byRoute.set(key, [...(byRoute.get(key) || []), entry]);
+  });
+
+  const candidates = [];
+  originEntries.forEach((originEntry) => {
+    (byRoute.get(originEntry.route.plannerKey) || []).forEach((destinationEntry) => {
+      if (originEntry.index >= destinationEntry.index) {
+        return;
+      }
+
+      candidates.push(plannerTransitCandidate(origin, destination, originEntry, destinationEntry));
+    });
+  });
+
+  return candidates;
+}
+
+function plannerTransferCandidates(origin, destination, originEntries, destinationEntries) {
+  const destinationByTransfer = new Map();
+  destinationEntries.forEach((destinationEntry) => {
+    for (let index = 0; index < destinationEntry.index; index += 1) {
+      const stop = destinationEntry.route.stops[index];
+      const key = plannerTransferKey(stop);
+      if (!key) {
+        continue;
+      }
+      destinationByTransfer.set(key, [...(destinationByTransfer.get(key) || []), {
+        route: destinationEntry.route,
+        transferIndex: index,
+        transferStop: stop,
+        destinationEntry,
+      }]);
+    }
+  });
+
+  const candidates = [];
+  const seen = new Set();
+  originEntries.forEach((originEntry) => {
+    for (let transferIndex = originEntry.index + 1; transferIndex < originEntry.route.stops.length - 1; transferIndex += 1) {
+      const transferStop = originEntry.route.stops[transferIndex];
+      const options = destinationByTransfer.get(plannerTransferKey(transferStop)) || [];
+
+      options.forEach((option) => {
+        if (originEntry.route.plannerKey === option.route.plannerKey) {
+          return;
+        }
+
+        const transferMeters = distanceMeters(transferStop.lat, transferStop.lon, option.transferStop.lat, option.transferStop.lon);
+        if (!Number.isFinite(transferMeters) || transferMeters > PLANNER_TRANSFER_MAX_METERS) {
+          return;
+        }
+
+        const key = `${originEntry.route.plannerKey}:${originEntry.index}:${transferIndex}>${option.route.plannerKey}:${option.transferIndex}:${option.destinationEntry.index}`;
+        if (seen.has(key)) {
+          return;
+        }
+        seen.add(key);
+
+        candidates.push(plannerTransferCandidate(origin, destination, originEntry, transferIndex, option, transferMeters));
+      });
+    }
+  });
+
+  return candidates;
+}
+
+function plannerTransitCandidate(origin, destination, originEntry, destinationEntry) {
+  const route = originEntry.route;
+  const rideMeters = plannerRouteSegmentMeters(route, originEntry.index, destinationEntry.index);
+  const walkMinutesA = originEntry.walkMeters / PLANNER_WALKING_SPEED_METERS_PER_MINUTE;
+  const walkMinutesB = destinationEntry.walkMeters / PLANNER_WALKING_SPEED_METERS_PER_MINUTE;
+  const waitMinutes = plannerAverageWaitMinutes(routeTransportType(route));
+  const rideMinutes = plannerRideMinutes(route, rideMeters);
+  const totalMinutes = walkMinutesA + waitMinutes + rideMinutes + walkMinutesB;
+  const walkingMeters = originEntry.walkMeters + destinationEntry.walkMeters;
+
+  return {
+    kind: 'transit',
+    transferCount: 0,
+    totalMinutes,
+    score: plannerScore(totalMinutes, walkingMeters, 0),
+    walkingMeters,
+    rideMeters,
+    waitMinutes,
+    steps: plannerSteps([
+      plannerWalkStep(origin, originEntry.stop, originEntry.walkMeters),
+      plannerRideStep(route, originEntry.index, destinationEntry.index, rideMeters, rideMinutes),
+      plannerWalkStep(destinationEntry.stop, destination, destinationEntry.walkMeters),
+    ]),
+  };
+}
+
+function plannerTransferCandidate(origin, destination, originEntry, transferIndex, option, transferMeters) {
+  const firstRoute = originEntry.route;
+  const secondRoute = option.route;
+  const firstRideMeters = plannerRouteSegmentMeters(firstRoute, originEntry.index, transferIndex);
+  const secondRideMeters = plannerRouteSegmentMeters(secondRoute, option.transferIndex, option.destinationEntry.index);
+  const firstRideMinutes = plannerRideMinutes(firstRoute, firstRideMeters);
+  const secondRideMinutes = plannerRideMinutes(secondRoute, secondRideMeters);
+  const transferMinutes = PLANNER_TRANSFER_MINUTES + transferMeters / PLANNER_WALKING_SPEED_METERS_PER_MINUTE;
+  const waitMinutes = plannerAverageWaitMinutes(routeTransportType(firstRoute)) + plannerAverageWaitMinutes(routeTransportType(secondRoute));
+  const walkingMeters = originEntry.walkMeters + option.destinationEntry.walkMeters + transferMeters;
+  const rideMeters = firstRideMeters + secondRideMeters;
+  const totalMinutes = originEntry.walkMeters / PLANNER_WALKING_SPEED_METERS_PER_MINUTE
+    + waitMinutes
+    + firstRideMinutes
+    + transferMinutes
+    + secondRideMinutes
+    + option.destinationEntry.walkMeters / PLANNER_WALKING_SPEED_METERS_PER_MINUTE;
+
+  return {
+    kind: 'transit',
+    transferCount: 1,
+    totalMinutes,
+    score: plannerScore(totalMinutes, walkingMeters, 1),
+    walkingMeters,
+    rideMeters,
+    waitMinutes,
+    steps: plannerSteps([
+      plannerWalkStep(origin, originEntry.stop, originEntry.walkMeters),
+      plannerRideStep(firstRoute, originEntry.index, transferIndex, firstRideMeters, firstRideMinutes),
+      plannerTransferStep(firstRoute.stops[transferIndex], option.transferStop, transferMeters, transferMinutes),
+      plannerRideStep(secondRoute, option.transferIndex, option.destinationEntry.index, secondRideMeters, secondRideMinutes),
+      plannerWalkStep(option.destinationEntry.stop, destination, option.destinationEntry.walkMeters),
+    ]),
+  };
+}
+
+function plannerWalkingCandidate(origin, destination, meters) {
+  const minutes = meters / PLANNER_WALKING_SPEED_METERS_PER_MINUTE;
+  return {
+    kind: 'walk',
+    transferCount: 0,
+    totalMinutes: minutes,
+    score: minutes,
+    walkingMeters: meters,
+    rideMeters: 0,
+    waitMinutes: 0,
+    steps: [plannerWalkStep(origin, destination, meters)],
+  };
+}
+
+function plannerSteps(steps) {
+  return steps.filter(Boolean);
+}
+
+function plannerWalkStep(from, to, meters) {
+  if (!isPlannerPlace(from) || !isPlannerPlace(to) || meters <= 25) {
+    return null;
+  }
+
+  return {
+    type: 'walk',
+    from,
+    to,
+    meters,
+    minutes: meters / PLANNER_WALKING_SPEED_METERS_PER_MINUTE,
+  };
+}
+
+function plannerRideStep(route, fromIndex, toIndex, meters, minutes) {
+  const from = route.stops[fromIndex];
+  const to = route.stops[toIndex];
+  if (!from || !to || fromIndex >= toIndex) {
+    return null;
+  }
+
+  return {
+    type: 'ride',
+    route,
+    fromIndex,
+    toIndex,
+    from,
+    to,
+    meters,
+    minutes,
+  };
+}
+
+function plannerTransferStep(from, to, meters, minutes) {
+  if (!from || !to) {
+    return null;
+  }
+
+  return {
+    type: 'transfer',
+    from,
+    to,
+    meters,
+    minutes,
+  };
+}
+
+function plannerRouteSegmentMeters(route, fromIndex, toIndex) {
+  const meters = plannerRouteStopMeters(route);
+  if (!meters.length || fromIndex < 0 || toIndex >= meters.length || fromIndex >= toIndex) {
+    return 0;
+  }
+
+  return Math.max(0, meters[toIndex] - meters[fromIndex]);
+}
+
+function plannerRouteStopMeters(route) {
+  if (Array.isArray(route._plannerStopMeters)) {
+    return route._plannerStopMeters;
+  }
+
+  let total = 0;
+  route._plannerStopMeters = route.stops.map((stop, index) => {
+    if (index > 0) {
+      const previous = route.stops[index - 1];
+      total += distanceMeters(previous.lat, previous.lon, stop.lat, stop.lon);
+    }
+    return total;
+  });
+
+  return route._plannerStopMeters;
+}
+
+function plannerRideMinutes(route, meters) {
+  const speed = PLANNER_TRANSIT_SPEED_METERS_PER_MINUTE[routeTransportType(route)] || PLANNER_TRANSIT_SPEED_METERS_PER_MINUTE.bus;
+  return meters / speed;
+}
+
+function plannerAverageWaitMinutes(type) {
+  return PLANNER_AVERAGE_WAIT_MINUTES[sanitizeTransportType(type)] || PLANNER_AVERAGE_WAIT_MINUTES.bus;
+}
+
+function plannerScore(totalMinutes, walkingMeters, transferCount) {
+  return totalMinutes + transferCount * 1.8 + walkingMeters / 1800;
+}
+
+function plannerCandidateSort(a, b) {
+  return a.score - b.score
+    || a.transferCount - b.transferCount
+    || a.walkingMeters - b.walkingMeters;
+}
+
+function plannerStopKey(stop) {
+  return String(stop?.stopId || stop?.id || `${normalizeScheduleText(stop?.name)}:${Number(stop?.lat).toFixed(5)}:${Number(stop?.lon).toFixed(5)}`);
+}
+
+function plannerTransferKey(stop) {
+  const name = normalizeScheduleText(stop?.name || '');
+  if (!name) {
+    return plannerStopKey(stop);
+  }
+
+  return `${name}:${normalizeScheduleText(stop?.area || '')}`;
+}
+
+function plannerStopsMatch(a, b) {
+  return plannerStopKey(a) === plannerStopKey(b) || scheduleStopsMatch(a, b);
+}
+
+function formatPlannerMinutes(value) {
+  const minutes = Math.max(1, Math.round(Number(value) || 0));
+  return `${minutes} min`;
+}
+
+function formatPlannerDistance(value) {
+  const meters = Math.max(0, Number(value) || 0);
+  if (meters >= 1000) {
+    return `${(meters / 1000).toFixed(1).replace('.', ',')} km`;
+  }
+
+  return `${Math.max(10, Math.round(meters / 10) * 10)} m`;
+}
+
+function drawPlannerRoute(result, { fit = true } = {}) {
+  if (!state.map || !state.routePlannerLayer || !result) {
+    return;
+  }
+
+  state.routePlannerLayer.clearLayers();
+  const pointsForBounds = [];
+  const alternatives = (state.planner.results || [])
+    .filter((candidate) => candidate !== result)
+    .slice(0, PLANNER_OPTION_LIMIT - 1);
+
+  alternatives.forEach((candidate) => drawPlannerAlternativeRoute(candidate));
+
+  result.steps.forEach((step) => {
+    if (step.type === 'ride') {
+      drawPlannerRideStep(step, pointsForBounds);
+      return;
+    }
+
+    if (step.type === 'walk') {
+      drawPlannerWalkStep(step, pointsForBounds);
+      return;
+    }
+
+    if (step.type === 'transfer' && step.meters > 25) {
+      drawPlannerWalkStep(step, pointsForBounds, true);
+    }
+  });
+
+  addPlannerPlaceMarker(state.planner.origin, 'origin', 'A', pointsForBounds);
+  addPlannerPlaceMarker(state.planner.destination, 'destination', 'B', pointsForBounds);
+  result.steps
+    .filter((step) => step.type === 'transfer')
+    .forEach((step) => addPlannerPlaceMarker(step.to, 'transfer', 'T', pointsForBounds));
+
+  if (fit && pointsForBounds.length >= 2) {
+    state.map.fitBounds(L.latLngBounds(pointsForBounds), {
+      padding: [42, 42],
+      maxZoom: 15,
+    });
+  }
+
+  hydrateIcons();
+}
+
+function drawPlannerAlternativeRoute(result) {
+  result.steps.forEach((step) => {
+    if (step.type === 'ride') {
+      drawPlannerAlternativeStep(step, false);
+      return;
+    }
+
+    if (step.type === 'walk' || (step.type === 'transfer' && step.meters > 25)) {
+      drawPlannerAlternativeStep(step, true);
+    }
+  });
+}
+
+function drawPlannerAlternativeStep(step, walking) {
+  const points = step.type === 'ride'
+    ? step.route.stops.slice(step.fromIndex, step.toIndex + 1).map((stop) => [stop.lat, stop.lon])
+    : [[step.from.lat, step.from.lon], [step.to.lat, step.to.lon]];
+  const validPoints = points.filter((point) => Number.isFinite(point[0]) && Number.isFinite(point[1]));
+  if (validPoints.length < 2) {
+    return;
+  }
+
+  L.polyline(validPoints, {
+    pane: 'routePlannerPane',
+    color: walking ? '#64748b' : '#334155',
+    weight: walking ? 2.5 : 4,
+    opacity: state.theme === 'dark' ? 0.34 : 0.28,
+    dashArray: walking ? '3 7' : '8 8',
+    lineCap: 'round',
+    lineJoin: 'round',
+    interactive: false,
+  }).addTo(state.routePlannerLayer);
+}
+
+function drawPlannerRideStep(step, pointsForBounds) {
+  const routeType = routeTransportType(step.route);
+  const color = routeColor(step.route.line, routeType);
+  const points = step.route.stops
+    .slice(step.fromIndex, step.toIndex + 1)
+    .map((stop) => [stop.lat, stop.lon])
+    .filter((point) => Number.isFinite(point[0]) && Number.isFinite(point[1]));
+  if (points.length < 2) {
+    return;
+  }
+
+  pointsForBounds.push(...points);
+  L.polyline(points, {
+    pane: 'routePlannerPane',
+    color: state.theme === 'dark' ? '#020617' : '#ffffff',
+    weight: 11,
+    opacity: 0.86,
+    lineCap: 'round',
+    lineJoin: 'round',
+    interactive: false,
+  }).addTo(state.routePlannerLayer);
+
+  const line = L.polyline(points, {
+    pane: 'routePlannerPane',
+    color,
+    weight: 6,
+    opacity: 0.96,
+    lineCap: 'round',
+    lineJoin: 'round',
+  }).addTo(state.routePlannerLayer);
+
+  line.bindTooltip(`${transportTitleLabel(routeType)} ${step.route.line}`, { sticky: true, opacity: 0.95 });
+}
+
+function drawPlannerWalkStep(step, pointsForBounds, isTransfer = false) {
+  const points = [
+    [step.from.lat, step.from.lon],
+    [step.to.lat, step.to.lon],
+  ];
+  if (points.some((point) => !Number.isFinite(point[0]) || !Number.isFinite(point[1]))) {
+    return;
+  }
+
+  pointsForBounds.push(...points);
+  L.polyline(points, {
+    pane: 'routePlannerPane',
+    color: isTransfer ? '#d97706' : '#475569',
+    weight: isTransfer ? 4 : 3,
+    opacity: state.theme === 'dark' ? 0.9 : 0.78,
+    dashArray: isTransfer ? '6 7' : '4 7',
+    lineCap: 'round',
+  }).addTo(state.routePlannerLayer);
+}
+
+function addPlannerPlaceMarker(place, kind, label, pointsForBounds) {
+  if (!isPlannerPlace(place)) {
+    return;
+  }
+
+  pointsForBounds.push([place.lat, place.lon]);
+  L.marker([place.lat, place.lon], {
+    pane: 'routePlannerPane',
+    icon: plannerPlaceIcon(place, kind, label),
+    title: plannerPlaceTitle(place),
+    zIndexOffset: kind === 'transfer' ? 940 : 960,
+  }).addTo(state.routePlannerLayer);
+}
+
+function plannerPlaceIcon(place, kind, label) {
+  return L.divIcon({
+    className: `planner-place-marker is-${kind}`,
+    html: `
+      <div class="planner-place-pin">
+        <span>${escapeHtml(label)}</span>
+        <strong>${escapeHtml(shortText(place.name || 'Asukoht', 18))}</strong>
+      </div>
+    `,
+    iconSize: [148, 44],
+    iconAnchor: [18, 38],
+    popupAnchor: [0, -34],
+  });
+}
+
 function placeStopMarker(stop) {
   state.stopLayer.clearLayers();
   if (!stop || !stop.lat || !stop.lon) return;
@@ -6984,6 +8391,9 @@ function refreshColoredLayers(renderControls = true) {
   renderDepartures();
   renderDelayPanel();
   refreshScheduleRouteHighlight();
+  if (state.planner.result) {
+    drawPlannerRoute(state.planner.result, { fit: false });
+  }
 }
 
 function refreshLineEmphasis() {
@@ -7521,16 +8931,16 @@ function registerServiceWorker() {
   if ('serviceWorker' in navigator) {
     let reloadedForWorker = false;
     navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (reloadedForWorker || sessionStorage.getItem('bussradar.swReloaded') === '192') {
+      if (reloadedForWorker || sessionStorage.getItem('bussradar.swReloaded') === '201') {
         return;
       }
 
       reloadedForWorker = true;
-      sessionStorage.setItem('bussradar.swReloaded', '192');
+      sessionStorage.setItem('bussradar.swReloaded', '201');
       window.location.reload();
     });
 
-    navigator.serviceWorker.register('service-worker.js?v=192').then((registration) => {
+    navigator.serviceWorker.register('service-worker.js?v=201').then((registration) => {
       registration.update?.();
 
       if (registration.waiting) {

@@ -4,6 +4,27 @@
   const USERNAME_PATTERN = /^[a-z0-9._-]{2,32}$/;
   const MIN_PASSWORD_LENGTH = 6;
   const DATA_BASE = 'https://transport.tallinn.ee';
+  const GEOCODE_BASE = 'https://nominatim.openstreetmap.org/search';
+  const KNOWN_TALLINN_PLACES = [
+    { name: 'Solaris Keskus', street: 'Estonia pst 9', area: 'Südalinn', lat: 59.4323, lon: 24.7540, type: 'Kaubanduskeskus', aliases: ['solaris'] },
+    { name: 'Viru Keskus', street: 'Viru väljak 4', area: 'Südalinn', lat: 59.4365, lon: 24.7564, type: 'Kaubanduskeskus', aliases: ['viru'] },
+    { name: 'Ülemiste Keskus', street: 'Suur-Sõjamäe 4', area: 'Ülemiste', lat: 59.4214, lon: 24.7939, type: 'Kaubanduskeskus', aliases: ['ulemiste', 'ülemiste'] },
+    { name: 'T1 Keskus', street: 'Peterburi tee 2', area: 'Ülemiste', lat: 59.4242, lon: 24.7925, type: 'Kaubanduskeskus', aliases: ['t1', 'mall of tallinn'] },
+    { name: 'Kristiine Keskus', street: 'Endla 45', area: 'Kristiine', lat: 59.4265, lon: 24.7217, type: 'Kaubanduskeskus', aliases: ['kristiine'] },
+    { name: 'Rocca al Mare Keskus', street: 'Paldiski mnt 102', area: 'Haabersti', lat: 59.4262, lon: 24.6513, type: 'Kaubanduskeskus', aliases: ['rocca', 'rocca al mare'] },
+    { name: 'Tallinna Bussijaam', street: 'Lastekodu 46', area: 'Kesklinn', lat: 59.4272, lon: 24.7734, type: 'Bussijaam', aliases: ['bussijaam', 'tallinn bus station'] },
+    { name: 'Tallinna Lennujaam', street: 'Tartu mnt 101', area: 'Ülemiste', lat: 59.4133, lon: 24.8328, type: 'Lennujaam', aliases: ['lennujaam', 'airport', 'tll'] },
+    { name: 'Balti jaam', street: 'Toompuiestee 37', area: 'Kalamaja', lat: 59.4390, lon: 24.7372, type: 'Raudteejaam', aliases: ['balti jaam', 'train station'] },
+    { name: 'Tallinna Sadam D-terminal', street: 'Lootsi 13', area: 'Sadama', lat: 59.4436, lon: 24.7687, type: 'Sadam', aliases: ['d-terminal', 'd terminal', 'sadam'] },
+    { name: 'Vabaduse väljak', street: 'Vabaduse väljak', area: 'Kesklinn', lat: 59.4338, lon: 24.7445, type: 'Väljak', aliases: ['vabaduse'] },
+    { name: 'Raekoja plats', street: 'Raekoja plats', area: 'Vanalinn', lat: 59.4372, lon: 24.7453, type: 'Väljak', aliases: ['raekoda', 'old town'] },
+    { name: 'Telliskivi Loomelinnak', street: 'Telliskivi 60a', area: 'Kalamaja', lat: 59.4389, lon: 24.7285, type: 'Koht', aliases: ['telliskivi'] },
+    { name: 'Noblessner', street: 'Peetri 10', area: 'Kalamaja', lat: 59.4526, lon: 24.7388, type: 'Koht', aliases: ['noblessner'] },
+    { name: 'Kumu Kunstimuuseum', street: 'Valge 1', area: 'Kadriorg', lat: 59.4360, lon: 24.7969, type: 'Muuseum', aliases: ['kumu'] },
+    { name: 'Kadrioru park', street: 'A. Weizenbergi', area: 'Kadriorg', lat: 59.4384, lon: 24.7906, type: 'Park', aliases: ['kadriorg'] },
+    { name: 'Mustamäe Keskus', street: 'A. H. Tammsaare tee 104a', area: 'Mustamäe', lat: 59.4073, lon: 24.6812, type: 'Kaubanduskeskus', aliases: ['mustamäe keskus', 'mustamae keskus'] },
+    { name: 'Lasnamäe Centrum', street: 'Mustakivi tee 13', area: 'Lasnamäe', lat: 59.4402, lon: 24.8706, type: 'Kaubanduskeskus', aliases: ['lasnamäe centrum', 'lasnamae centrum'] },
+  ];
   const DEFAULT_PROXY_BASES = [
     'https://r.jina.ai/http://{rawUrl}',
     'https://api.allorigins.win/raw?url=',
@@ -27,12 +48,16 @@
         return handleVehicles(parsed.searchParams);
       case 'stops':
         return handleStops(parsed.searchParams);
+      case 'places':
+        return handlePlaces(parsed.searchParams);
       case 'mapStops':
         return handleMapStops(parsed.searchParams);
       case 'lines':
         return handleLines(parsed.searchParams);
       case 'routes':
         return handleRoutes(parsed.searchParams);
+      case 'plannerRoutes':
+        return handlePlannerRoutes(parsed.searchParams);
       case 'schedule':
         return handleSchedule(parsed.searchParams);
       case 'departures':
@@ -89,6 +114,67 @@
       ok: true,
       source: `${DATA_BASE}/data/stops.txt`,
       stops,
+    };
+  }
+
+  async function handlePlaces(params) {
+    const query = cleanText(params.get('q') || '');
+    if (query.length < 2) {
+      return { ok: true, places: [] };
+    }
+
+    const localPlaces = await localPlaceResults(query);
+    if (localPlaces.length > 0) {
+      return {
+        ok: true,
+        source: 'local',
+        updatedAt: new Date().toISOString(),
+        geocodeError: '',
+        places: uniqueGeocodePlaces(localPlaces).slice(0, 12),
+      };
+    }
+
+    let remotePlaces = [];
+    let geocodeError = '';
+    const geocodeQuery = /tallinn|eesti|estonia/i.test(query)
+      ? query
+      : `${query}, Tallinn, Eesti`;
+    const search = new URLSearchParams({
+      format: 'jsonv2',
+      q: geocodeQuery,
+      addressdetails: '1',
+      namedetails: '1',
+      limit: '10',
+      countrycodes: 'ee',
+      'accept-language': 'et',
+      viewbox: '24.35,59.65,25.25,59.25',
+      bounded: '0',
+    });
+    const source = `${GEOCODE_BASE}?${search.toString()}`;
+
+    try {
+      const cached = textCache.get(source);
+      const now = Date.now();
+      const raw = cached && now - cached.time < 6 * 60 * 60 * 1000
+        ? cached.text
+        : await fetchGeocodeText(source);
+      textCache.set(source, { time: now, text: raw });
+      const rows = JSON.parse(raw);
+      remotePlaces = (Array.isArray(rows) ? rows : [])
+        .map((row, index) => normalizeGeocodePlace(row, query, index))
+        .filter(Boolean);
+    } catch (error) {
+      geocodeError = error?.message || 'Kohaotsing ei vastanud.';
+    }
+
+    const places = uniqueGeocodePlaces([...localPlaces, ...remotePlaces]).slice(0, 12);
+
+    return {
+      ok: true,
+      source,
+      updatedAt: new Date().toISOString(),
+      geocodeError,
+      places,
     };
   }
 
@@ -166,6 +252,35 @@
     });
 
     const routes = parseRouteLines(routesRaw, stopsByPlatformId, lineFilter, true, wantedType);
+
+    return {
+      ok: true,
+      source: `${DATA_BASE}/data/routes.txt`,
+      updatedAt: new Date().toISOString(),
+      routes,
+    };
+  }
+
+  async function handlePlannerRoutes(params) {
+    const wantedType = sanitizeTransportType(cleanText(params.get('type') || 'bus').toLowerCase());
+    const [stopsRaw, routesRaw] = await Promise.all([
+      fetchText(`${DATA_BASE}/data/stops.txt`, { ttl: 60 * 60 * 1000 }),
+      fetchText(`${DATA_BASE}/data/routes.txt`, { ttl: 60 * 60 * 1000 }),
+    ]);
+    const stopsByPlatformId = new Map();
+
+    parseStructuredStops(stopsRaw, true).forEach((stop) => {
+      stopsByPlatformId.set(stop.stopId, stop);
+    });
+
+    const lineFilter = parseAvailableLines(routesRaw, wantedType);
+    const routes = parseRouteLines(routesRaw, stopsByPlatformId, lineFilter, false, wantedType)
+      .filter((route) => route.type === wantedType)
+      .map((route) => ({
+        ...route,
+        points: route.stops.map((stop) => [stop.lat, stop.lon]),
+        shapeQuality: 'planner-stops',
+      }));
 
     return {
       ok: true,
@@ -524,6 +639,21 @@
     throw new Error(`Andmeallikat ei saanud avada: ${lastError?.message || 'võrguviga'}.`);
   }
 
+  async function fetchGeocodeText(url) {
+    const response = await fetchWithTimeout(url, {
+      cache: 'no-store',
+      headers: {
+        Accept: 'application/json',
+      },
+    }, 4500);
+
+    if (!response.ok) {
+      throw new Error(`Kohaotsing ei vastanud: HTTP ${response.status}`);
+    }
+
+    return response.text();
+  }
+
   function proxyUrls(url) {
     const custom = window.BUSSRADAR_CORS_PROXY || readStorage('bussradar.corsProxy', '') || '';
     return [custom, ...DEFAULT_PROXY_BASES]
@@ -673,6 +803,166 @@
     });
 
     return results;
+  }
+
+  async function localPlaceResults(query) {
+    const knownPlaces = knownTallinnPlaceResults(query);
+    const schoolPlaces = await schoolPlaceResults(query);
+    return [...knownPlaces, ...schoolPlaces];
+  }
+
+  function knownTallinnPlaceResults(query) {
+    return KNOWN_TALLINN_PLACES
+      .filter((place) => placeMatchesQuery(place, query))
+      .map((place, index) => ({
+        id: `known:${index}:${normalizeSearchText(place.name)}`,
+        stopId: '',
+        siriId: '',
+        name: place.name,
+        street: place.street,
+        area: place.area,
+        city: 'Tallinn',
+        lat: place.lat,
+        lon: place.lon,
+        isCoordinate: true,
+        isPlace: true,
+        type: place.type,
+      }));
+  }
+
+  async function schoolPlaceResults(query) {
+    try {
+      const response = await fetch('data/schools.json', { cache: 'no-store' });
+      if (!response.ok) {
+        return [];
+      }
+
+      const schools = await response.json();
+      return (Array.isArray(schools) ? schools : [])
+        .filter((school) => placeMatchesQuery(school, query))
+        .map((school, index) => ({
+          id: `school:${index}:${normalizeSearchText(school.name)}`,
+          stopId: '',
+          siriId: '',
+          name: cleanText(school.name),
+          street: '',
+          area: '',
+          city: 'Tallinn',
+          lat: Number(school.lat),
+          lon: Number(school.lon),
+          isCoordinate: true,
+          isPlace: true,
+          type: 'Kool',
+        }))
+        .filter((place) => isTallinnTransitCoordinate(place.lat, place.lon));
+    } catch {
+      return [];
+    }
+  }
+
+  function placeMatchesQuery(place, query) {
+    const needle = normalizeSearchText(query);
+    const aliases = Array.isArray(place.aliases) ? place.aliases.join(' ') : '';
+    const haystack = normalizeSearchText(`${place.name || ''} ${place.street || ''} ${place.area || ''} ${place.city || ''} ${aliases}`);
+    return haystack.includes(needle);
+  }
+
+  function normalizeGeocodePlace(row, query, index) {
+    const lat = Number(row?.lat);
+    const lon = Number(row?.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon) || !isTallinnTransitCoordinate(lat, lon)) {
+      return null;
+    }
+
+    const address = row.address && typeof row.address === 'object' ? row.address : {};
+    const namedetails = row.namedetails && typeof row.namedetails === 'object' ? row.namedetails : {};
+    const road = cleanText(address.road || address.pedestrian || address.footway || address.path || '');
+    const house = cleanText(address.house_number || '');
+    const area = cleanText(address.suburb || address.city_district || address.neighbourhood || address.quarter || '');
+    const city = cleanText(address.city || address.town || address.municipality || 'Tallinn');
+    const fallbackName = cleanText(String(row.display_name || '').split(',')[0] || query);
+    const name = cleanText(
+      namedetails.name
+      || row.name
+      || address.amenity
+      || address.shop
+      || address.tourism
+      || address.leisure
+      || address.building
+      || fallbackName
+      || query
+    );
+    const street = road && house ? `${road} ${house}` : road;
+    const displayParts = String(row.display_name || '')
+      .split(',')
+      .map(cleanText)
+      .filter(Boolean)
+      .filter((part) => part !== name)
+      .slice(0, 3);
+    const id = cleanText(row.osm_type && row.osm_id
+      ? `place:${row.osm_type}:${row.osm_id}`
+      : `place:${lat.toFixed(6)},${lon.toFixed(6)}:${index}`);
+
+    return {
+      id,
+      stopId: '',
+      siriId: '',
+      name: name || query,
+      street: street || displayParts.join(', '),
+      area,
+      city,
+      lat,
+      lon,
+      isCoordinate: true,
+      isPlace: true,
+      type: geocodeTypeLabel(row),
+    };
+  }
+
+  function geocodeTypeLabel(row) {
+    const typeKey = cleanText(row?.type || row?.class || '').toLowerCase();
+    if (!typeKey) {
+      return 'Koht';
+    }
+
+    const labels = {
+      bus_stop: 'Peatus',
+      tram_stop: 'Peatus',
+      stop_position: 'Peatus',
+      house: 'Aadress',
+      residential: 'Piirkond',
+      suburb: 'Piirkond',
+      neighbourhood: 'Piirkond',
+      shopping_centre: 'Kaubanduskeskus',
+      supermarket: 'Pood',
+      restaurant: 'Söögikoht',
+      cafe: 'Kohvik',
+      school: 'Kool',
+      university: 'Ülikool',
+      hospital: 'Haigla',
+      hotel: 'Hotell',
+    };
+
+    return labels[typeKey] || 'Koht';
+  }
+
+  function uniqueGeocodePlaces(places) {
+    const seen = new Set();
+    return places.filter((place) => {
+      const key = `${normalizeSearchText(place.name)}:${place.lat.toFixed(5)}:${place.lon.toFixed(5)}`;
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+  }
+
+  function normalizeSearchText(value) {
+    return cleanText(value)
+      .toLocaleLowerCase('et')
+      .normalize('NFD')
+      .replace(/\p{Diacritic}/gu, '');
   }
 
   function parseStructuredStops(raw, includeAggregates = false) {

@@ -305,7 +305,8 @@ button {
   border-color: var(--brand-2);
 }
 
-.icon-button.is-loading svg {
+.icon-button.is-loading svg,
+.tool-button.is-loading svg {
   animation: smoothSpin 920ms linear infinite;
 }
 
@@ -1460,6 +1461,369 @@ body.is-live-refreshing .status-pill {
   color: var(--muted);
   font-size: 0.82rem;
   text-align: right;
+}
+
+.stop-result span em {
+  margin-right: 5px;
+  color: var(--brand);
+  font-style: normal;
+  font-weight: 900;
+}
+
+.planner-form {
+  display: grid;
+  gap: 9px;
+}
+
+.planner-form .field-label {
+  margin: 2px 0 -3px;
+}
+
+.planner-action-row,
+.planner-submit-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.planner-action-row {
+  justify-content: flex-start;
+}
+
+.planner-submit-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 40px 40px;
+}
+
+.planner-submit-row .tool-button {
+  width: 100%;
+}
+
+.planner-picked {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  background: var(--panel-soft);
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.planner-picked span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.planner-picked .is-empty {
+  color: var(--muted);
+}
+
+.planner-picked svg {
+  width: 16px;
+  height: 16px;
+  color: var(--muted);
+}
+
+.planner-result {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.planner-options {
+  display: grid;
+  gap: 7px;
+}
+
+.planner-option {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: inherit;
+  background: var(--item-bg);
+  text-align: left;
+  transition: border-color var(--motion-fast) ease, background var(--motion-fast) ease, transform var(--motion-fast) var(--motion-curve);
+}
+
+.planner-option:hover,
+.planner-option.is-active {
+  border-color: color-mix(in srgb, var(--brand) 46%, var(--line));
+  background: color-mix(in srgb, var(--brand) 9%, var(--item-bg));
+  transform: translateY(-1px);
+}
+
+.planner-option > span {
+  min-width: 0;
+}
+
+.planner-option strong,
+.planner-option small {
+  display: block;
+}
+
+.planner-option strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.86rem;
+}
+
+.planner-option small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.25;
+}
+
+.planner-option-lines {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.planner-line-chip.walk {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--brand) 34%, var(--line));
+  border-radius: 8px;
+  color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 9%, var(--panel));
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.planner-card {
+  display: grid;
+  gap: 11px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--brand) 36%, var(--line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--brand) 7%, var(--item-bg));
+  animation: itemEnter var(--motion-slow) var(--motion-curve) both;
+}
+
+.planner-card-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.planner-card-head > span:last-child {
+  min-width: 0;
+}
+
+.planner-card-head strong,
+.planner-card-head small {
+  display: block;
+}
+
+.planner-card-head small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.planner-time {
+  min-width: 76px;
+  min-height: 58px;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  padding: 6px;
+  border-radius: 8px;
+  color: #ffffff;
+  background: var(--brand);
+  text-align: center;
+}
+
+.planner-time strong {
+  font-size: 1.03rem;
+  line-height: 1;
+}
+
+.planner-time small {
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 0.68rem;
+  font-weight: 850;
+}
+
+.planner-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.planner-facts span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-soft);
+}
+
+.planner-facts svg {
+  width: 16px;
+  height: 16px;
+  color: var(--brand);
+}
+
+.planner-facts small,
+.planner-facts strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.planner-facts small {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 850;
+}
+
+.planner-facts strong {
+  font-size: 0.78rem;
+}
+
+.planner-steps {
+  display: grid;
+  gap: 7px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.planner-step {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--item-bg);
+}
+
+.planner-step > span:last-child {
+  min-width: 0;
+}
+
+.planner-step strong,
+.planner-step small {
+  display: block;
+}
+
+.planner-step strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.88rem;
+}
+
+.planner-step small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.3;
+}
+
+.planner-step-icon {
+  width: 30px;
+  height: 30px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--brand) 34%, var(--line));
+  border-radius: 8px;
+  color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 9%, var(--panel));
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.planner-step-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.planner-place-marker {
+  border: 0;
+  background: transparent;
+}
+
+.planner-place-pin {
+  max-width: 148px;
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 8px 5px 5px;
+  border: 2px solid #ffffff;
+  border-radius: 8px;
+  color: #ffffff;
+  background: var(--brand);
+  box-shadow: 0 10px 24px rgba(18, 34, 31, 0.2);
+}
+
+.planner-place-marker.is-destination .planner-place-pin {
+  background: #2563eb;
+}
+
+.planner-place-marker.is-transfer .planner-place-pin {
+  color: #3a2500;
+  background: var(--amber);
+}
+
+.planner-place-pin span {
+  width: 24px;
+  height: 24px;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 7px;
+  color: var(--brand);
+  background: #ffffff;
+  font-size: 0.78rem;
+  font-weight: 950;
+}
+
+.planner-place-marker.is-destination .planner-place-pin span {
+  color: #2563eb;
+}
+
+.planner-place-marker.is-transfer .planner-place-pin span {
+  color: #7c2d12;
+}
+
+.planner-place-pin strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.78rem;
 }
 
 .transfer-grid {
@@ -4689,6 +5053,41 @@ body.is-live-refreshing .status-pill {
   color: #f8cf8b;
   border-color: color-mix(in srgb, var(--amber) 36%, var(--line));
   background: color-mix(in srgb, var(--amber) 9%, var(--panel));
+}
+
+:root[data-theme="dark"] .planner-card,
+:root[data-theme="dark"] .planner-option,
+:root[data-theme="dark"] .planner-facts span,
+:root[data-theme="dark"] .planner-step,
+:root[data-theme="dark"] .planner-picked {
+  border-color: rgba(148, 163, 184, 0.14);
+  background: #111821;
+}
+
+:root[data-theme="dark"] .planner-option:hover,
+:root[data-theme="dark"] .planner-option.is-active {
+  border-color: color-mix(in srgb, var(--brand) 30%, var(--line));
+  background: color-mix(in srgb, var(--brand) 7%, var(--panel));
+}
+
+:root[data-theme="dark"] .planner-time {
+  color: #041113;
+  background: var(--brand);
+}
+
+:root[data-theme="dark"] .planner-time small {
+  color: rgba(4, 17, 19, 0.72);
+}
+
+:root[data-theme="dark"] .planner-step-icon {
+  color: #8ee7df;
+  border-color: color-mix(in srgb, var(--brand) 28%, var(--line));
+  background: color-mix(in srgb, var(--brand) 7%, var(--panel));
+}
+
+:root[data-theme="dark"] .planner-place-pin {
+  border-color: #080c11;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 18%, transparent), 0 10px 26px rgba(0, 0, 0, 0.42);
 }
 
 :root[data-theme="dark"] .schedule-stop-highlight-pin,
