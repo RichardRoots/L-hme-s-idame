@@ -4,9 +4,11 @@ const DATA_BASE = 'https://transport.tallinn.ee';
 const LIVE_DIR = 'data/live';
 const SHAPES_DIR = `${LIVE_DIR}/shapes`;
 const TRAM_SHAPES_DIR = `${SHAPES_DIR}/tram`;
+const TROLLEY_SHAPES_DIR = `${SHAPES_DIR}/trolleybus`;
 
 await mkdir(SHAPES_DIR, { recursive: true });
 await mkdir(TRAM_SHAPES_DIR, { recursive: true });
+await mkdir(TROLLEY_SHAPES_DIR, { recursive: true });
 
 const [gps, stops, routes] = await Promise.all([
   downloadText(`${DATA_BASE}/gps.txt`, `${LIVE_DIR}/gps.txt`),
@@ -17,15 +19,20 @@ const [gps, stops, routes] = await Promise.all([
 const fetchedShapes = {
   bus: [],
   tram: [],
+  trolleybus: [],
 };
 
-for (const type of ['bus', 'tram']) {
+for (const type of ['bus', 'tram', 'trolleybus']) {
   for (const line of routeLines(routes, type)) {
-    const url = `${DATA_BASE}/data/tallinna-linn_${type}_${encodeURIComponent(line)}.txt`;
-    const path = type === 'tram' ? `${TRAM_SHAPES_DIR}/${line}.txt` : `${SHAPES_DIR}/${line}.txt`;
+    const url = `${DATA_BASE}/data/tallinna-linn_${shapeTransportName(type)}_${encodeURIComponent(shapeLineName(type, line))}.txt`;
+    const path = type === 'tram'
+      ? `${TRAM_SHAPES_DIR}/${line}.txt`
+      : type === 'trolleybus'
+        ? `${TROLLEY_SHAPES_DIR}/${line}.txt`
+        : `${SHAPES_DIR}/${line}.txt`;
 
     try {
-      const shape = await fetchText(url);
+      const shape = normalizeShapeText(await fetchText(url));
       await writeFile(path, shape, 'utf8');
       fetchedShapes[type].push(line);
     } catch (error) {
@@ -42,9 +49,10 @@ await writeFile(`${LIVE_DIR}/manifest.json`, JSON.stringify({
   routesBytes: routes.length,
   shapeLines: fetchedShapes.bus,
   tramShapeLines: fetchedShapes.tram,
+  trolleyShapeLines: fetchedShapes.trolleybus,
 }, null, 2), 'utf8');
 
-console.log(`Updated transit mirror: ${fetchedShapes.bus.length} bus and ${fetchedShapes.tram.length} tram shape files.`);
+console.log(`Updated transit mirror: ${fetchedShapes.bus.length} bus, ${fetchedShapes.tram.length} tram and ${fetchedShapes.trolleybus.length} trolley shape files.`);
 
 async function downloadText(url, path) {
   const text = await fetchText(url);
@@ -74,15 +82,12 @@ function routeLines(raw, wantedTransport = 'bus') {
 
   tableRows(raw, ';').slice(1).forEach((sourceRow) => {
     const row = padRow(sourceRow, 14);
-    const line = cleanText(removeBom(row[0]));
-    const transport = cleanText(row[3]).toLowerCase();
+    const rawTransport = cleanText(row[3]).toLowerCase();
+    const transport = rawTransport ? sanitizeTransportType(rawTransport) : '';
+    const line = normalizeRouteLine(row[0], transport || currentTransport || wantedTransport);
 
     if (line) {
-      const normalized = line.toUpperCase();
-      if (!/^[0-9A-Z]+$/.test(normalized)) {
-        return;
-      }
-      currentLine = normalized;
+      currentLine = line;
     }
 
     if (transport) {
@@ -96,6 +101,40 @@ function routeLines(raw, wantedTransport = 'bus') {
   });
 
   return [...lines].sort((a, b) => a.localeCompare(b, 'et', { numeric: true }));
+}
+
+function sanitizeTransportType(type) {
+  const normalized = String(type || '').toLowerCase();
+  if (normalized === 'tram') return 'tram';
+  if (normalized === 'trol' || normalized === 'trolley' || normalized === 'trolleybus') return 'trolleybus';
+  return 'bus';
+}
+
+function normalizeRouteLine(value, type = 'bus') {
+  const normalizedType = sanitizeTransportType(type);
+  const cleaned = cleanText(removeBom(value)).replace(/\s*\(.+\)\s*$/, '').toUpperCase();
+  const line = normalizedType === 'tram' ? cleaned.replace(/^T(?=\d)/, '') : cleaned;
+  return /^[0-9A-Z]+$/.test(line) ? line : '';
+}
+
+function shapeTransportName(type) {
+  const normalized = sanitizeTransportType(type);
+  if (normalized === 'tram') return 'tram';
+  if (normalized === 'trolleybus') return 'trol';
+  return 'bus';
+}
+
+function shapeLineName(type, line) {
+  const normalizedType = sanitizeTransportType(type);
+  const normalizedLine = cleanText(line).replace(/\s*\(.+\)\s*$/, '').replace(/[^0-9A-Za-z]/g, '').toLowerCase();
+  if (normalizedType === 'tram' && !normalizedLine.startsWith('t')) {
+    return `t${normalizedLine}`;
+  }
+  return normalizedLine;
+}
+
+function normalizeShapeText(text) {
+  return `${String(text).split(/\r\n|\r|\n/).map((line) => line.trimEnd()).join('\n').trimEnd()}\n`;
 }
 
 function tableRows(text, delimiter) {

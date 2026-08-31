@@ -80,9 +80,9 @@
   }
 
   async function handleVehicles(params) {
-    const lineFilter = normalizeLineList(params.get('lines') || '');
     const rawType = cleanText(params.get('type') || 'bus').toLowerCase();
     const wantedType = rawType === 'all' ? 'all' : sanitizeTransportType(rawType);
+    const lineFilter = normalizeLineList(params.get('lines') || '', wantedType);
     const raw = await fetchText(`${DATA_BASE}/gps.txt`, { ttl: 5000, preferLive: true });
     const vehicles = parseGpsVehicles(raw).filter((vehicle) => {
       if (wantedType && wantedType !== 'all' && vehicle.type !== wantedType) {
@@ -204,8 +204,8 @@
   }
 
   async function handleRoutes(params) {
-    const lineFilter = normalizeLineList(params.get('lines') || '');
     const wantedType = sanitizeTransportType(cleanText(params.get('type') || 'bus').toLowerCase());
+    const lineFilter = normalizeLineList(params.get('lines') || '', wantedType);
     if (lineFilter.length === 0) {
       return { ok: true, routes: [] };
     }
@@ -221,7 +221,8 @@
     });
 
     const stopRoutes = parseRouteLines(routesRaw, stopsByPlatformId, lineFilter, false, wantedType);
-    const shapeRoutes = await parseOfficialLineShapeRoutes(lineFilter, wantedType);
+    const currentLineFilter = [...new Set(stopRoutes.map((route) => route.line))];
+    const shapeRoutes = await parseOfficialLineShapeRoutes(currentLineFilter, wantedType);
     const routes = shapeRoutes.length > 0
       ? mergeShapeRoutesWithStops(shapeRoutes, stopRoutes)
       : stopRoutes.map((route) => ({ ...route, shapeQuality: 'route-stops' }));
@@ -235,8 +236,8 @@
   }
 
   async function handleSchedule(params) {
-    const lineFilter = normalizeLineList(params.get('line') || params.get('lines') || '');
     const wantedType = sanitizeTransportType(cleanText(params.get('type') || 'bus').toLowerCase());
+    const lineFilter = normalizeLineList(params.get('line') || params.get('lines') || '', wantedType);
     if (lineFilter.length === 0) {
       return { ok: true, routes: [] };
     }
@@ -543,12 +544,12 @@
 
   function normalizePreferences(payload) {
     const preferences = defaultPreferences();
+    preferences.transportType = sanitizeTransportType(payload.transportType || 'bus');
     const lines = Array.isArray(payload.lines)
       ? payload.lines
       : String(payload.lines || '').split(/[\s,;]+/);
 
-    preferences.lines = [...new Set(lines.map((line) => normalizeLine(String(line))).filter(Boolean))];
-    preferences.transportType = sanitizeTransportType(payload.transportType || 'bus');
+    preferences.lines = [...new Set(lines.map((line) => normalizeRouteLine(String(line), preferences.transportType)).filter(Boolean))];
     preferences.stop = normalizePreferenceStop(payload.stop);
     preferences.favoriteStops = Array.isArray(payload.favoriteStops)
       ? payload.favoriteStops.map(normalizePreferenceStop).filter(Boolean)
@@ -592,11 +593,11 @@
 
   function normalizePreferenceLineStateKey(value) {
     const text = cleanText(value);
-    const match = text.match(/^(bus|tram):(.+)$/i);
-    if (match) {
-      const line = normalizeLine(match[2]);
-      return line ? lineStateKey(line, match[1].toLowerCase()) : '';
-    }
+      const match = text.match(/^(bus|tram|trol|trolley|trolleybus):(.+)$/i);
+      if (match) {
+        const line = normalizeRouteLine(match[2], match[1].toLowerCase());
+        return line ? lineStateKey(line, match[1].toLowerCase()) : '';
+      }
 
     const line = normalizeLine(text);
     return line ? lineStateKey(line, 'bus') : '';
@@ -713,11 +714,17 @@
         return 'data/live/routes.txt';
       }
 
-      const shape = parsed.pathname.match(/^\/data\/tallinna-linn_(bus|tram)_([^/]+)\.txt$/);
+      const shape = parsed.pathname.match(/^\/data\/tallinna-linn_(bus|tram|trol)_([^/]+)\.txt$/);
       if (shape) {
-        const type = shape[1] === 'tram' ? 'tram' : 'bus';
-        const line = encodeURIComponent(shape[2]);
-        return type === 'tram' ? `data/live/shapes/tram/${line}.txt` : `data/live/shapes/${line}.txt`;
+        const type = sanitizeTransportType(shape[1]);
+        const line = encodeURIComponent(shapeMirrorLineName(type, shape[2]));
+        if (type === 'tram') {
+          return `data/live/shapes/tram/${line}.txt`;
+        }
+        if (type === 'trolleybus') {
+          return `data/live/shapes/trolleybus/${line}.txt`;
+        }
+        return `data/live/shapes/${line}.txt`;
       }
     } catch {
       return '';
@@ -1051,15 +1058,17 @@
 
     rows.slice(1).forEach((sourceRow) => {
       const row = padRow(sourceRow, 14);
-      const line = cleanText(removeBom(row[0]));
-      const transport = cleanText(row[3]).toLowerCase();
+      const rawTransport = cleanText(row[3]).toLowerCase();
+      const transport = rawTransport ? sanitizeTransportType(rawTransport) : '';
+      const rawLine = cleanText(removeBom(row[0]));
+      const line = normalizeRouteLine(rawLine, transport || currentTransport || wantedType);
+
+      if (rawLine && !line) {
+        return;
+      }
 
       if (line) {
-        const normalized = line.toUpperCase();
-        if (!/^[0-9A-Z]+$/.test(normalized)) {
-          return;
-        }
-        currentLine = normalized;
+        currentLine = line;
       }
 
       if (transport) {
@@ -1084,15 +1093,17 @@
 
     rows.slice(1).forEach((sourceRow, sourceIndex) => {
       const row = padRow(sourceRow, 14);
-      const line = cleanText(removeBom(row[0]));
-      const transport = cleanText(row[3]).toLowerCase();
+      const rawTransport = cleanText(row[3]).toLowerCase();
+      const transport = rawTransport ? sanitizeTransportType(rawTransport) : '';
+      const rawLine = cleanText(removeBom(row[0]));
+      const line = normalizeRouteLine(rawLine, transport || currentTransport || wantedType);
+
+      if (rawLine && !line) {
+        return;
+      }
 
       if (line) {
-        const normalized = line.toUpperCase();
-        if (!/^[0-9A-Z]+$/.test(normalized)) {
-          return;
-        }
-        currentLine = normalized;
+        currentLine = line;
       }
 
       if (transport) {
@@ -1132,7 +1143,7 @@
 
       routes.push({
         line: currentLine,
-        type: currentTransport || wantedType || 'bus',
+        type: sanitizeTransportType(currentTransport || wantedType || 'bus'),
         tag: cleanText(row[8]),
         routeType: cleanText(row[9]),
         name: cleanText(row[10]),
@@ -1150,7 +1161,7 @@
 
   async function parseOfficialLineShapeRoutes(lineFilter, wantedType = 'bus') {
     const groups = await Promise.all(lineFilter.map(async (line) => {
-      const url = `${DATA_BASE}/data/tallinna-linn_${shapeTransportName(wantedType)}_${encodeURIComponent(line)}.txt`;
+      const url = `${DATA_BASE}/data/tallinna-linn_${shapeTransportName(wantedType)}_${encodeURIComponent(shapeLineName(wantedType, line))}.txt`;
       try {
         const raw = await fetchText(url, { ttl: 60 * 60 * 1000 });
         return parseOfficialLineShapeFile(line, raw, wantedType);
@@ -1266,7 +1277,7 @@
 
       const currentSeconds = serverSeconds === undefined ? null : Number(serverSeconds);
       departures.push({
-        type: mode,
+        type: sanitizeTransportType(mode),
         line: parts[i + 1].toUpperCase(),
         expectedSeconds: expected,
         scheduledSeconds: scheduled,
@@ -1385,9 +1396,9 @@
     return padded;
   }
 
-  function normalizeLineList(input) {
+  function normalizeLineList(input, type = 'bus') {
     return [...new Set(String(input).toUpperCase().trim().split(/[\s,;]+/)
-      .map((item) => item.trim())
+      .map((item) => normalizeRouteLine(item, type))
       .filter((item) => /^[0-9A-Z]+$/.test(item)))];
   }
 
@@ -1459,7 +1470,17 @@
   }
 
   function sanitizeTransportType(type) {
-    return type === 'tram' ? 'tram' : 'bus';
+    const normalized = String(type || '').toLowerCase();
+    if (normalized === 'tram') return 'tram';
+    if (normalized === 'trol' || normalized === 'trolley' || normalized === 'trolleybus') return 'trolleybus';
+    return 'bus';
+  }
+
+  function normalizeRouteLine(value, type = 'bus') {
+    const normalizedType = sanitizeTransportType(type);
+    const cleaned = cleanText(removeBom(value)).replace(/\s*\(.+\)\s*$/, '').toUpperCase();
+    const line = normalizedType === 'tram' ? cleaned.replace(/^T(?=\d)/, '') : cleaned;
+    return /^[0-9A-Z]+$/.test(line) ? line : '';
   }
 
   function lineStateKey(line, type = 'bus') {
@@ -1467,7 +1488,28 @@
   }
 
   function shapeTransportName(type) {
-    return sanitizeTransportType(type) === 'tram' ? 'tram' : 'bus';
+    const normalizedType = sanitizeTransportType(type);
+    if (normalizedType === 'tram') return 'tram';
+    if (normalizedType === 'trolleybus') return 'trol';
+    return 'bus';
+  }
+
+  function shapeLineName(type, line) {
+    const normalizedType = sanitizeTransportType(type);
+    const normalizedLine = normalizeLine(String(line || '')).toLowerCase();
+    if (normalizedType === 'tram' && !normalizedLine.startsWith('t')) {
+      return `t${normalizedLine}`;
+    }
+    return normalizedLine;
+  }
+
+  function shapeMirrorLineName(type, line) {
+    const normalizedType = sanitizeTransportType(type);
+    const normalizedLine = normalizeLine(String(line || '')).toUpperCase();
+    if (normalizedType === 'tram') {
+      return normalizedLine.replace(/^T(?=\d)/, '');
+    }
+    return normalizedLine;
   }
 
   function routeKey(line, tag) {

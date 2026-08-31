@@ -3006,8 +3006,16 @@ body.is-live-refreshing .status-pill {
   background: var(--badge-color, #ea580c);
 }
 
+.route-badge.trolleybus {
+  background: var(--badge-color, #0891b2);
+}
+
 .legend-dot.tram {
   background: #ea580c;
+}
+
+.legend-dot.trolleybus {
+  background: #0891b2;
 }
 
 .legend-dot.crowd {
@@ -3216,6 +3224,23 @@ body.is-live-refreshing .status-pill {
   text-shadow: 0 1px 2px rgba(18, 34, 31, 0.4);
 }
 
+.vehicle-marker.is-trolleybus .vehicle-pin {
+  border-color: #f0fdff;
+  background:
+    linear-gradient(160deg, color-mix(in srgb, var(--vehicle-color, #0891b2) 78%, #ffffff) 0%, var(--vehicle-color, #0891b2) 54%, color-mix(in srgb, var(--vehicle-color, #0891b2) 78%, #0f172a) 100%);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--vehicle-color, #0891b2) 22%, transparent), 0 9px 20px rgba(18, 34, 31, 0.28);
+}
+
+.vehicle-marker.is-trolleybus .vehicle-mode-symbol {
+  bottom: 3px;
+  color: rgba(255, 255, 255, 0.86);
+}
+
+.vehicle-marker.is-trolleybus .vehicle-mode-symbol svg {
+  width: 15px;
+  height: 15px;
+}
+
 .vehicle-arrow {
   position: absolute;
   top: -7px;
@@ -3382,6 +3407,10 @@ body.is-live-refreshing .status-pill {
   content: "Minu tramm";
 }
 
+.vehicle-marker.is-trolleybus.transfer-current .vehicle-icon-wrap::after {
+  content: "Minu troll";
+}
+
 .vehicle-marker.transfer-target .vehicle-icon-wrap::after {
   content: "Sihtbuss";
   background: #2563eb;
@@ -3389,6 +3418,10 @@ body.is-live-refreshing .status-pill {
 
 .vehicle-marker.is-tram.transfer-target .vehicle-icon-wrap::after {
   content: "Sihttramm";
+}
+
+.vehicle-marker.is-trolleybus.transfer-target .vehicle-icon-wrap::after {
+  content: "Sihttroll";
 }
 
 .vehicle-marker.risk-medium {

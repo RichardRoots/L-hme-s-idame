@@ -232,6 +232,7 @@ function hasStoredPreferences(preferences) {
     || Object.keys(preferences.lineColors || {}).length > 0
     || Object.keys(preferences.lineEmphasis || {}).length > 0
     || preferences.transportType === 'tram'
+    || sanitizeTransportType(preferences.transportType) === 'trolleybus'
     || preferences.theme === 'dark';
 }
 
@@ -292,7 +293,10 @@ function normalizeUsernameInput(value) {
 }
 
 function sanitizeTransportType(type) {
-  return type === 'tram' ? 'tram' : 'bus';
+  const normalized = String(type || '').toLowerCase();
+  if (normalized === 'tram') return 'tram';
+  if (normalized === 'trol' || normalized === 'trolley' || normalized === 'trolleybus') return 'trolleybus';
+  return 'bus';
 }
 
 function linesStorageKey(type) {

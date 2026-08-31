@@ -2,7 +2,8 @@ const TALLINN_CENTER = [59.437, 24.7536];
 const DEFAULT_LINES = ['18', '40', '60'];
 const DEFAULT_LINES_BY_TYPE = {
   bus: DEFAULT_LINES,
-  tram: ['1', '2', '3', '4', '5'],
+  tram: ['1', '2', '3', '4', '5', '6'],
+  trolleybus: ['72', '81', '83', '84', '85'],
 };
 const DEFAULT_STOP = { id: '1297', name: 'Laikmaa', lat: 59.43614, lon: 24.75755 };
 const REFRESH_SECONDS = 10;
@@ -38,10 +39,12 @@ const PLANNER_TRANSFER_MINUTES = 4;
 const PLANNER_AVERAGE_WAIT_MINUTES = {
   bus: 5,
   tram: 4,
+  trolleybus: 4,
 };
 const PLANNER_TRANSIT_SPEED_METERS_PER_MINUTE = {
   bus: 310,
   tram: 330,
+  trolleybus: 310,
 };
 
 const state = {
@@ -300,7 +303,10 @@ function updateMapDensity() {
 }
 
 function sanitizeTransportType(type) {
-  return type === 'tram' ? 'tram' : 'bus';
+  const normalized = String(type || '').toLowerCase();
+  if (normalized === 'tram') return 'tram';
+  if (normalized === 'trol' || normalized === 'trolley' || normalized === 'trolleybus') return 'trolleybus';
+  return 'bus';
 }
 
 function activeTransportType() {
@@ -309,11 +315,11 @@ function activeTransportType() {
 
 function visibleTransportTypes() {
   const type = activeTransportType();
-  if (type !== 'tram') {
+  if (type === 'bus') {
     return ['bus'];
   }
 
-  return state.showBusesInTram ? ['bus', 'tram'] : ['tram'];
+  return state.showBusesInTram ? ['bus', type] : [type];
 }
 
 function isTransportTypeVisible(type) {
@@ -342,41 +348,55 @@ function transportMapOpacity(type = activeTransportType()) {
     return 0;
   }
 
-  return activeTransportType() === 'tram' && normalizedType === 'bus' ? 0.52 : 1;
+  return activeTransportType() !== 'bus' && normalizedType === 'bus' ? 0.52 : 1;
 }
 
 function transportLabel(type = activeTransportType()) {
   const normalizedType = sanitizeTransportType(type);
+  if (normalizedType === 'trolleybus') return 'troll';
   return normalizedType === 'tram' ? 'tramm' : 'buss';
 }
 
 function transportPluralLabel(type = activeTransportType()) {
   const normalizedType = sanitizeTransportType(type);
+  if (normalizedType === 'trolleybus') return 'trolle';
   return normalizedType === 'tram' ? 'tramme' : 'busse';
 }
 
 function transportPluralNominativeLabel(type = activeTransportType()) {
   const normalizedType = sanitizeTransportType(type);
+  if (normalizedType === 'trolleybus') return 'trollid';
   return normalizedType === 'tram' ? 'trammid' : 'bussid';
 }
 
 function transportPluralGenitiveLabel(type = activeTransportType()) {
   const normalizedType = sanitizeTransportType(type);
+  if (normalizedType === 'trolleybus') return 'trollide';
   return normalizedType === 'tram' ? 'trammide' : 'busside';
 }
 
 function transportTitleLabel(type = activeTransportType()) {
   const normalizedType = sanitizeTransportType(type);
+  if (normalizedType === 'trolleybus') return 'Troll';
   return normalizedType === 'tram' ? 'Tramm' : 'Buss';
+}
+
+function transportModeIcon(type = activeTransportType()) {
+  const normalizedType = sanitizeTransportType(type);
+  if (normalizedType === 'tram') return 'tram-front';
+  if (normalizedType === 'trolleybus') return 'zap';
+  return 'bus-front';
 }
 
 function transportLineLabel(type = activeTransportType()) {
   const normalizedType = sanitizeTransportType(type);
+  if (normalizedType === 'trolleybus') return 'Trolliliin';
   return normalizedType === 'tram' ? 'Trammiliin' : 'Bussiliin';
 }
 
 function transportPanelTitle(type = activeTransportType()) {
   const normalizedType = sanitizeTransportType(type);
+  if (normalizedType === 'trolleybus') return 'Valitud trollid';
   return normalizedType === 'tram' ? 'Valitud trammid' : 'Valitud bussid';
 }
 
@@ -390,6 +410,7 @@ function routeTransportType(route) {
 
 function routeBadgeModeClass(type = activeTransportType()) {
   const normalizedType = sanitizeTransportType(type);
+  if (normalizedType === 'trolleybus') return ' trolleybus';
   return normalizedType === 'tram' ? ' tram' : '';
 }
 
@@ -408,17 +429,20 @@ function lineStateKey(line, type = activeTransportType()) {
 function updateTransportUi() {
   const type = activeTransportType();
   const tram = type === 'tram';
+  const trolleybus = type === 'trolleybus';
+  const hasBusOverlay = type !== 'bus';
   document.body?.classList.toggle('transport-tram', tram);
   document.body?.classList.toggle('transport-bus', type === 'bus');
+  document.body?.classList.toggle('transport-trolleybus', trolleybus);
 
   if (els.transportModeToggle) {
     const nextType = nextTransportType();
     const title = `Lülita ${transportPluralNominativeLabel(nextType)} sisse`;
-    els.transportModeToggle.classList.toggle('is-active', tram);
-    els.transportModeToggle.setAttribute('aria-pressed', tram ? 'true' : 'false');
+    els.transportModeToggle.classList.toggle('is-active', hasBusOverlay);
+    els.transportModeToggle.setAttribute('aria-pressed', hasBusOverlay ? 'true' : 'false');
     els.transportModeToggle.setAttribute('aria-label', title);
     els.transportModeToggle.title = title;
-    els.transportModeToggle.querySelector('i')?.setAttribute('data-lucide', nextType === 'tram' ? 'tram-front' : 'bus-front');
+    els.transportModeToggle.querySelector('i')?.setAttribute('data-lucide', transportModeIcon(nextType));
   }
   if (els.transportModeText) {
     els.transportModeText.textContent = transportPluralNominativeLabel(nextTransportType()).replace(/^./, (letter) => letter.toUpperCase());
@@ -430,14 +454,15 @@ function updateTransportUi() {
     els.lineLabel.textContent = transportLineLabel(type);
   }
   if (els.lineInput) {
-    els.lineInput.placeholder = tram ? 'nt 1' : 'nt 18';
+    els.lineInput.placeholder = type === 'tram' ? 'nt 1' : type === 'trolleybus' ? 'nt 72' : 'nt 18';
     els.lineInput.disabled = false;
   }
   if (els.tramBusOverlayToggle) {
     const busesVisible = Boolean(state.showBusesInTram);
     const label = busesVisible ? 'Bussid kaardil' : 'Bussid peidetud';
-    const title = busesVisible ? 'Peida bussid trammivaates' : 'Näita bussid trammivaates';
-    els.tramBusOverlayToggle.hidden = !tram;
+    const viewLabel = type === 'trolleybus' ? 'trollivaates' : 'trammivaates';
+    const title = busesVisible ? `Peida bussid ${viewLabel}` : `Näita bussid ${viewLabel}`;
+    els.tramBusOverlayToggle.hidden = !hasBusOverlay;
     els.tramBusOverlayToggle.classList.toggle('is-off', !busesVisible);
     els.tramBusOverlayToggle.setAttribute('aria-pressed', busesVisible ? 'true' : 'false');
     els.tramBusOverlayToggle.setAttribute('aria-label', title);
@@ -805,16 +830,17 @@ function bindEvents() {
   });
 
   els.tramBusOverlayToggle?.addEventListener('click', () => {
-    if (activeTransportType() !== 'tram') {
+    if (activeTransportType() === 'bus') {
       return;
     }
 
+    const currentType = activeTransportType();
     state.showBusesInTram = !state.showBusesInTram;
     saveTramBusOverlay();
     updateTransportUi();
     if (!state.showBusesInTram) {
-      state.vehicles = state.vehicles.filter((vehicle) => vehicleTransportType(vehicle) === 'tram');
-      state.routes = state.routes.filter((route) => routeTransportType(route) === 'tram');
+      state.vehicles = state.vehicles.filter((vehicle) => vehicleTransportType(vehicle) === currentType);
+      state.routes = state.routes.filter((route) => routeTransportType(route) === currentType);
       renderVehicles();
       renderRoutes();
       renderRouteStops();
@@ -826,7 +852,7 @@ function bindEvents() {
 
   els.lineForm.addEventListener('submit', (event) => {
     event.preventDefault();
-    const value = normalizeLine(els.lineInput.value);
+    const value = normalizeLineForTransport(els.lineInput.value);
     if (!value) return;
 
     if (!state.selectedLines.includes(value)) {
@@ -1065,14 +1091,16 @@ function hasStoredPreferences(preferences) {
     || Object.keys(preferences.lineColors || {}).length > 0
     || Object.keys(preferences.lineEmphasis || {}).length > 0
     || preferences.transportType === 'tram'
+    || sanitizeTransportType(preferences.transportType) === 'trolleybus'
     || preferences.theme === 'dark';
 }
 
 function applyUserPreferences(preferences, reload = false) {
+  const transportType = sanitizeTransportType(preferences.transportType || state.transportType);
   const lines = Array.isArray(preferences.lines)
-    ? preferences.lines.map((line) => normalizeLine(String(line))).filter(Boolean)
+    ? preferences.lines.map((line) => normalizeLineForTransport(String(line), transportType)).filter(Boolean)
     : [];
-  state.transportType = sanitizeTransportType(preferences.transportType || state.transportType);
+  state.transportType = transportType;
   if (lines.length > 0) {
     state.selectedLines = [...new Set(lines)];
   }
@@ -1123,9 +1151,9 @@ function sanitizeLineEmphasis(values) {
 
 function normalizeLineStateKey(value) {
   const text = String(value || '').trim();
-  const match = text.match(/^(bus|tram):(.+)$/i);
+  const match = text.match(/^(bus|tram|trol|trolley|trolleybus):(.+)$/i);
   if (match) {
-    const line = normalizeLine(match[2]);
+    const line = normalizeLineForTransport(match[2], match[1].toLowerCase());
     return line ? lineStateKey(line, match[1].toLowerCase()) : '';
   }
 
@@ -1322,7 +1350,7 @@ async function fetchVehicles() {
     return;
   }
 
-  setStatus(activeTransportType() === 'tram' && state.showBusesInTram ? 'Laen busse ja tramme' : `Laen ${transportPluralLabel()}`, false);
+  setStatus(activeTransportType() !== 'bus' && state.showBusesInTram ? `Laen busse ja ${transportPluralLabel()}` : `Laen ${transportPluralLabel()}`, false);
 
   try {
     const groups = await Promise.all(configs.map(async (config) => {
@@ -1403,7 +1431,7 @@ function renderVehicles() {
 
     const risk = vehicleDelayRisk(vehicle);
     const key = vehicleKey(vehicle);
-    const title = `${vehicleTransportType(vehicle) === 'tram' ? 'Tramm' : 'Liin'} ${vehicle.line}`;
+    const title = `${transportTitleLabel(vehicleTransportType(vehicle))} ${vehicle.line}`;
     const popupContent = vehiclePopup(vehicle, risk);
     const signature = vehicleIconSignature(vehicle, risk);
     activeKeys.add(key);
@@ -4019,7 +4047,9 @@ function renderRoutes() {
 }
 
 function nextTransportType() {
-  return activeTransportType() === 'bus' ? 'tram' : 'bus';
+  const order = ['bus', 'tram', 'trolleybus'];
+  const index = order.indexOf(activeTransportType());
+  return order[(index + 1) % order.length] || 'bus';
 }
 
 function routeCanDraw(route) {
@@ -4027,7 +4057,7 @@ function routeCanDraw(route) {
     return false;
   }
 
-  return routeTransportType(route) !== 'tram' || route.shapeQuality === 'road-shape';
+  return routeTransportType(route) === 'bus' || route.shapeQuality === 'road-shape';
 }
 
 function renderOverviewRoutes(styledRoutes) {
@@ -4042,17 +4072,18 @@ function renderOverviewRoutes(styledRoutes) {
     const emphasis = lineMapOpacity(route.line, routeType) * transportMapOpacity(routeType);
     const dark = state.theme === 'dark';
     const tram = routeType === 'tram';
+    const guided = routeType === 'tram' || routeType === 'trolleybus';
     const mainDash = style.dashArray;
     const mainWeight = style.weight + (dark ? 1 : 0);
 
     L.polyline(segments, {
       pane: 'routePane',
-      color: tram ? tramRouteRailColor() : routeGapColor(),
-      weight: style.weight + (tram ? 4 : (dark ? 5 : 3)),
-      opacity: (tram ? (dark ? 0.54 : 0.64) : (dark ? (style.dashArray ? 0.72 : 0.58) : (style.dashArray ? 0.58 : 0.44))) * emphasis,
+      color: tram ? tramRouteRailColor() : routeType === 'trolleybus' ? trolleyRouteWireColor() : routeGapColor(),
+      weight: style.weight + (guided ? 4 : (dark ? 5 : 3)),
+      opacity: (guided ? (dark ? 0.54 : 0.64) : (dark ? (style.dashArray ? 0.72 : 0.58) : (style.dashArray ? 0.58 : 0.44))) * emphasis,
       lineCap: 'round',
       lineJoin: 'round',
-      dashArray: tram ? null : style.dashArray,
+      dashArray: guided ? null : style.dashArray,
       dashOffset: style.dashOffset,
       smoothFactor: 1.5,
       interactive: false,
@@ -4070,10 +4101,10 @@ function renderOverviewRoutes(styledRoutes) {
       smoothFactor: 1.5,
     }).addTo(state.routeLayer);
 
-    if (tram) {
+    if (guided) {
       L.polyline(segments, {
         pane: 'routePane',
-        color: state.theme === 'dark' ? '#fff7ed' : '#fffaf0',
+        color: tram ? (state.theme === 'dark' ? '#fff7ed' : '#fffaf0') : (state.theme === 'dark' ? '#e0f2fe' : '#ecfeff'),
         weight: 1.35,
         opacity: Math.min(0.62, 0.46 * emphasis),
         lineCap: 'round',
@@ -4084,7 +4115,7 @@ function renderOverviewRoutes(styledRoutes) {
       }).addTo(state.routeLayer);
     }
 
-    line.bindTooltip(`${tram ? 'Tramm' : 'Liin'} ${escapeHtml(route.line)} · ${escapeHtml(style.label)}`, {
+    line.bindTooltip(`${transportTitleLabel(routeType)} ${escapeHtml(route.line)} · ${escapeHtml(style.label)}`, {
       sticky: true,
       opacity: 0.95,
     });
@@ -4308,6 +4339,10 @@ function tramRouteRailColor() {
   return state.theme === 'dark' ? '#1f2937' : '#ffffff';
 }
 
+function trolleyRouteWireColor() {
+  return state.theme === 'dark' ? '#083344' : '#cffafe';
+}
+
 function routeDirectionStyle(route) {
   return routeDirectionIndex(route) % 2 === 1
     ? ROUTE_SIDE_STYLES.north
@@ -4360,7 +4395,7 @@ function renderRouteStops() {
 function vehicleIcon(vehicle, risk) {
   const riskClass = risk.level === 'high' ? 'risk-high' : risk.level === 'medium' ? 'risk-medium' : '';
   const transportType = vehicleTransportType(vehicle);
-  const transportClass = transportType === 'tram' ? 'is-tram' : 'is-bus';
+  const transportClass = transportType === 'tram' ? 'is-tram' : transportType === 'trolleybus' ? 'is-trolleybus' : 'is-bus';
   const riskBadge = risk.level === 'high' || risk.level === 'medium'
     ? '<span class="vehicle-risk-badge" aria-hidden="true">!</span>'
     : '';
@@ -4400,6 +4435,10 @@ function vehicleModeSymbolHtml(type = activeTransportType()) {
     return '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="3" width="12" height="13" rx="3"></rect><path d="M9 16l-2 4"></path><path d="M15 16l2 4"></path><path d="M9 8h6"></path><path d="M9 12h.01"></path><path d="M15 12h.01"></path></svg>';
   }
 
+  if (normalizedType === 'trolleybus') {
+    return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h10"></path><path d="M9 3l-2 4"></path><path d="M15 3l2 4"></path><rect x="5" y="7" width="14" height="10" rx="3"></rect><path d="M8 11h8"></path><path d="M8 15h.01"></path><path d="M16 15h.01"></path><path d="M8 17v2"></path><path d="M16 17v2"></path></svg>';
+  }
+
   return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 17h12"></path><path d="M6 17v2"></path><path d="M18 17v2"></path><rect x="5" y="4" width="14" height="13" rx="3"></rect><path d="M8 9h8"></path><path d="M8 13h.01"></path><path d="M16 13h.01"></path></svg>';
 }
 
@@ -4429,7 +4468,7 @@ function renderVehicleList() {
     const profile = vehicleProfile(vehicle);
     return `
       <button class="vehicle-row ${riskClass}" type="button" data-vehicle-key="${escapeHtml(vehicleKey(vehicle))}">
-        <span class="route-badge compact ${vehicleTransportType(vehicle) === 'tram' ? 'tram' : ''}" style="--badge-color: ${routeColor(vehicle.line, vehicleTransportType(vehicle))}">${escapeHtml(vehicle.line)}</span>
+        <span class="route-badge compact${routeBadgeModeClass(vehicleTransportType(vehicle))}" style="--badge-color: ${routeColor(vehicle.line, vehicleTransportType(vehicle))}">${escapeHtml(vehicle.line)}</span>
         <span class="vehicle-row-text">
           <strong>${escapeHtml(vehicle.destination || 'Siht teadmata')}</strong>
           <span class="vehicle-type-chip ${profile.isElectric ? 'electric' : ''} ${profile.isArticulated ? 'articulated' : ''} ${profile.isKnown ? '' : 'unknown'}">
@@ -4470,7 +4509,7 @@ function vehiclePopup(vehicle, risk) {
   const riskDetail = risk.detail ? `<small>${escapeHtml(risk.detail)}</small>` : '';
   const profile = vehicleProfile(vehicle);
   const fleetInfo = vehicleFleetInfoHtml(profile);
-  const headingLabel = vehicleTransportType(vehicle) === 'tram' ? 'Tramm' : 'Liin';
+  const headingLabel = transportTitleLabel(vehicleTransportType(vehicle));
   return `
     <div class="popup-card vehicle-popup-card risk-${riskClass}">
       <div class="vehicle-popup-head">
@@ -5337,7 +5376,7 @@ async function ensurePlannerRoutes() {
 }
 
 function plannerTransportTypes() {
-  return ['bus', 'tram'];
+  return ['bus', 'tram', 'trolleybus'];
 }
 
 async function enrichPlannerResultsWithLiveDepartures(results) {
@@ -6087,7 +6126,7 @@ function scheduleRouteHighlightPoints(route) {
     return sameLineRoute.points;
   }
 
-  return type === 'tram' ? [] : (route.points || []);
+  return type === 'bus' ? (route.points || []) : [];
 }
 
 function normalizedRouteDirectionTag(tag) {
@@ -6210,7 +6249,7 @@ function renderScheduleLineOptions() {
 }
 
 function selectScheduleLine(value) {
-  const line = normalizeLine(String(value || ''));
+  const line = normalizeLineForTransport(String(value || ''));
   if (!line) {
     return;
   }
@@ -6227,7 +6266,7 @@ function selectScheduleLine(value) {
 }
 
 async function fetchSchedule() {
-  const line = normalizeLine(state.scheduleLine || state.selectedLines[0] || defaultLinesForTransport()[0] || '');
+  const line = normalizeLineForTransport(state.scheduleLine || state.selectedLines[0] || defaultLinesForTransport()[0] || '');
   if (!line) {
     renderScheduleEmpty('Vali liin');
     return;
@@ -7819,6 +7858,26 @@ function bearingDifference(a, b) {
 }
 
 function vehicleProfile(vehicle) {
+  if (vehicleTransportType(vehicle) === 'trolleybus') {
+    return {
+      isKnown: true,
+      isTrolleybus: true,
+      isElectric: true,
+      isArticulated: false,
+      badge: 'Tr',
+      shortLabel: 'Troll',
+      sizeLabel: 'Troll',
+      powerLabel: 'Elektriga',
+      model: '',
+      power: 'electric',
+      size: 'trolleybus',
+      facts: [
+        { icon: 'trolleybus', label: 'Troll' },
+        { icon: 'zap', label: 'Elektriga' },
+      ],
+    };
+  }
+
   if (vehicleTransportType(vehicle) === 'tram') {
     return {
       isKnown: true,
@@ -8123,6 +8182,7 @@ function vehicleFactIconHtml(icon) {
   const icons = {
     info: '<svg class="vehicle-fact-svg" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 10v6"></path><path d="M12 7h.01"></path></svg>',
     tram: '<svg class="vehicle-fact-svg" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="12" rx="3"></rect><path d="M8 15l-2 4"></path><path d="M16 15l2 4"></path><path d="M8 8h8"></path><path d="M9 12h.01"></path><path d="M15 12h.01"></path></svg>',
+    trolleybus: '<svg class="vehicle-fact-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h10"></path><path d="M9 3l-2 4"></path><path d="M15 3l2 4"></path><rect x="5" y="7" width="14" height="10" rx="3"></rect><path d="M8 11h8"></path><path d="M8 15h.01"></path><path d="M16 15h.01"></path><path d="M8 17v2"></path><path d="M16 17v2"></path></svg>',
     ruler: '<svg class="vehicle-fact-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 15 15 4l5 5L9 20z"></path><path d="M8 15l-2-2"></path><path d="M11 12l-2-2"></path><path d="M14 9l-2-2"></path></svg>',
     zap: '<svg class="vehicle-fact-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 10-14h-7z"></path></svg>',
     leaf: '<svg class="vehicle-fact-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20c8 0 14-6 14-14V4h-2C9 4 3 10 3 18c0 1 1 2 2 2z"></path><path d="M3 20c4-6 8-9 14-12"></path></svg>',
@@ -8150,7 +8210,7 @@ function renderLineTags() {
     return `
       <div class="line-control-row" data-line="${escapeHtml(line)}" data-transport-type="${escapeHtml(type)}" style="--line-color: ${color}; --line-emphasis: ${emphasis}%">
         <label class="line-color-picker" title="Muuda liini ${escapeHtml(line)} värvi">
-          <span class="route-badge compact ${activeTransportType() === 'tram' ? 'tram' : ''}" style="--badge-color: ${color}">${escapeHtml(line)}</span>
+          <span class="route-badge compact${routeBadgeModeClass(type)}" style="--badge-color: ${color}">${escapeHtml(line)}</span>
           <input class="line-color-input" type="color" value="${escapeHtml(color)}" data-line="${escapeHtml(line)}" data-transport-type="${escapeHtml(type)}" aria-label="Vali liini ${escapeHtml(line)} värv">
         </label>
         <label class="line-opacity-control">
@@ -8620,7 +8680,7 @@ function loadLines(type = activeTransportType()) {
     const raw = localStorage.getItem(storageKey) || (normalizedType === 'bus' ? localStorage.getItem('bussradar.lines') : 'null');
     const stored = JSON.parse(raw || 'null');
     if (Array.isArray(stored) && stored.length > 0) {
-      return stored.map(normalizeLine).filter(Boolean);
+      return stored.map((line) => normalizeLineForTransport(line, normalizedType)).filter(Boolean);
     }
   } catch {
     return defaultLinesForTransport(normalizedType);
@@ -8682,7 +8742,7 @@ function loadScheduleLine(type = activeTransportType()) {
   try {
     const raw = localStorage.getItem(scheduleLineStorageKey(normalizedType))
       || (normalizedType === 'bus' ? localStorage.getItem('bussradar.scheduleLine') : '');
-    const stored = normalizeLine(raw || '');
+    const stored = normalizeLineForTransport(raw || '', normalizedType);
     if (stored) {
       return stored;
     }
@@ -8842,6 +8902,19 @@ function routeColor(line, type = activeTransportType()) {
     }
   }
 
+  if (normalizedType === 'trolleybus') {
+    const trolleyPreferred = {
+      72: '#0891b2',
+      81: '#0e7490',
+      83: '#0369a1',
+      84: '#2563eb',
+      85: '#4f46e5',
+    };
+    if (Object.prototype.hasOwnProperty.call(trolleyPreferred, text)) {
+      return trolleyPreferred[text];
+    }
+  }
+
   const preferred = {
     18: '#16a34a',
     40: '#0284c7',
@@ -8886,6 +8959,11 @@ function isHexColor(value) {
 
 function normalizeLine(value) {
   return value.trim().toUpperCase().replace(/[^0-9A-Z]/g, '');
+}
+
+function normalizeLineForTransport(value, type = activeTransportType()) {
+  const line = normalizeLine(String(value || ''));
+  return sanitizeTransportType(type) === 'tram' ? line.replace(/^T(?=\d)/, '') : line;
 }
 
 function vehicleKey(vehicle) {
@@ -8940,7 +9018,7 @@ function registerServiceWorker() {
       window.location.reload();
     });
 
-    navigator.serviceWorker.register('service-worker.js?v=201').then((registration) => {
+    navigator.serviceWorker.register('service-worker.js?v=202').then((registration) => {
       registration.update?.();
 
       if (registration.waiting) {
