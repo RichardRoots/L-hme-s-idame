@@ -1,14 +1,14 @@
-const CACHE_NAME = 'bussradar-v202';
+ const CACHE_NAME = 'bussradar-v203';
 const APP_SHELL = [
   './',
   './index.html',
   './reset.html',
   './login.html',
   './api.html',
-  './assets/css/styles.css?v=202',
-  './assets/js/static-api.js?v=202',
-  './assets/js/app.js?v=202',
-  './assets/js/auth.js?v=202',
+  './assets/css/styles.css?v=203',
+  './assets/js/static-api.js?v=203',
+  './assets/js/app.js?v=203',
+  './assets/js/auth.js?v=203',
   './assets/icon.svg',
   './assets/favicon-32.png',
   './assets/icon-192.png',
@@ -20,10 +20,23 @@ const APP_SHELL = [
   './manifest.json'
 ];
 
+async function cacheAppShell() {
+  const cache = await caches.open(CACHE_NAME);
+  await Promise.all(APP_SHELL.map(async (url) => {
+    try {
+      const response = await fetch(new Request(url, { cache: 'reload' }));
+      if (response && response.ok) {
+        await cache.put(url, response);
+      }
+    } catch {
+      // A single missing/offline shell asset should not block the worker update.
+    }
+  }));
+}
+
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then((cache) => cache.addAll(APP_SHELL))
+    cacheAppShell()
       .then(() => self.skipWaiting())
   );
 });

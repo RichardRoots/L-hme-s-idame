@@ -6,6 +6,7 @@ $Sources = @(
 )
 $DataDir = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot (Join-Path ".." "data")))
 $OutputPath = Join-Path $DataDir "fleet.json"
+$Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 
 New-Item -ItemType Directory -Force -Path $DataDir | Out-Null
 function Clean-HtmlText {
@@ -138,5 +139,5 @@ $payload = [ordered]@{
 }
 
 $json = $payload | ConvertTo-Json -Depth 8
-[System.IO.File]::WriteAllText(([System.IO.Path]::GetFullPath($OutputPath)), $json, [System.Text.Encoding]::UTF8)
+[System.IO.File]::WriteAllText(([System.IO.Path]::GetFullPath($OutputPath)), $json, $Utf8NoBom)
 Write-Host "Updated fleet data: $($vehicles.Count) active vehicles."

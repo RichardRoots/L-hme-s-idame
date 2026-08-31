@@ -9,6 +9,7 @@ const DEFAULT_STOP = { id: '1297', name: 'Laikmaa', lat: 59.43614, lon: 24.75755
 const REFRESH_SECONDS = 10;
 const WEATHER_REFRESH_MS = 10 * 60 * 1000;
 const GPS_REFRESH_MS = 5000;
+const APP_VERSION = '203';
 const TRANSPORT_TYPE_KEY = 'bussradar.transportType';
 const TRAM_BUS_OVERLAY_KEY = 'bussradar.tramBusOverlay';
 const INITIAL_TRANSPORT_TYPE = loadTransportType();
@@ -152,7 +153,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadAuthStatus();
   await loadFleetData();
   loadInitialData();
-  lucide.createIcons();
+  hydrateIcons();
   queueFirstVisitOnboarding();
 });
 
@@ -495,7 +496,7 @@ function setTransportType(type) {
   saveLines();
   saveScheduleLine();
   state.transportType = nextType;
-  localStorage.setItem(TRANSPORT_TYPE_KEY, nextType);
+  writeStorage(TRANSPORT_TYPE_KEY, nextType);
   state.selectedLines = loadLines(nextType);
   state.scheduleLine = loadScheduleLine(nextType);
   state.scheduleAvailableLines = [];
@@ -817,7 +818,7 @@ function hydrateIcons() {
 }
 
 function bindEvents() {
-  els.themeToggle.addEventListener('click', () => {
+  els.themeToggle?.addEventListener('click', () => {
     setTheme(state.theme === 'dark' ? 'light' : 'dark');
   });
 
@@ -850,7 +851,7 @@ function bindEvents() {
     fetchRoutes();
   });
 
-  els.lineForm.addEventListener('submit', (event) => {
+  els.lineForm?.addEventListener('submit', (event) => {
     event.preventDefault();
     const value = normalizeLineForTransport(els.lineInput.value);
     if (!value) return;
@@ -868,7 +869,7 @@ function bindEvents() {
     els.lineInput.value = '';
   });
 
-  els.refreshButton.addEventListener('click', () => {
+  els.refreshButton?.addEventListener('click', () => {
     refreshAll();
   });
 
@@ -882,13 +883,13 @@ function bindEvents() {
 
   els.schedulePanelDrag?.addEventListener('pointerdown', startSchedulePanelDrag);
 
-  els.locateButton.addEventListener('click', () => {
+  els.locateButton?.addEventListener('click', () => {
     locateUser();
   });
 
   els.panelCollapseToggle?.addEventListener('pointerdown', startSidePanelDrag);
 
-  els.stopSearchForm.addEventListener('submit', (event) => {
+  els.stopSearchForm?.addEventListener('submit', (event) => {
     event.preventDefault();
     searchStops();
   });
@@ -997,12 +998,12 @@ function bindEvents() {
     }
   });
 
-  els.favoriteStopForm.addEventListener('submit', (event) => {
+  els.favoriteStopForm?.addEventListener('submit', (event) => {
     event.preventDefault();
     searchFavoriteStops();
   });
 
-  els.toggleSchools.addEventListener('click', () => {
+  els.toggleSchools?.addEventListener('click', () => {
     state.schoolsVisible = !state.schoolsVisible;
     renderSchools();
     els.toggleSchools.classList.toggle('muted', !state.schoolsVisible);
@@ -1114,12 +1115,14 @@ function applyUserPreferences(preferences, reload = false) {
     : [];
   state.lineColors = sanitizeLineColors(preferences.lineColors || {});
   state.lineEmphasis = sanitizeLineEmphasis(preferences.lineEmphasis || {});
-  localStorage.setItem(TRANSPORT_TYPE_KEY, state.transportType);
+  writeStorage(TRANSPORT_TYPE_KEY, state.transportType);
   setTheme(preferences.theme === 'dark' ? 'dark' : 'light', false);
   persistLocalPreferences();
   updateTransportUi();
 
-  els.selectedStopName.textContent = state.selectedStop.name;
+  if (els.selectedStopName) {
+    els.selectedStopName.textContent = state.selectedStop.name;
+  }
   renderLineTags();
   renderScheduleLineOptions();
   placeStopMarker(state.selectedStop);
@@ -1198,21 +1201,21 @@ function preferencesPayload() {
 }
 
 function persistLocalPreferences() {
-  localStorage.setItem(TRANSPORT_TYPE_KEY, activeTransportType());
-  localStorage.setItem(linesStorageKey(activeTransportType()), JSON.stringify(state.selectedLines));
+  writeStorage(TRANSPORT_TYPE_KEY, activeTransportType());
+  writeStorage(linesStorageKey(activeTransportType()), JSON.stringify(state.selectedLines));
   if (activeTransportType() === 'bus') {
-    localStorage.setItem('bussradar.lines', JSON.stringify(state.selectedLines));
+    writeStorage('bussradar.lines', JSON.stringify(state.selectedLines));
   }
-  localStorage.setItem('bussradar.stop', JSON.stringify(state.selectedStop));
-  localStorage.setItem('bussradar.favoriteStops', JSON.stringify(state.favoriteStops));
-  localStorage.setItem('bussradar.lineColors', JSON.stringify(state.lineColors));
-  localStorage.setItem('bussradar.lineEmphasis', JSON.stringify(state.lineEmphasis));
-  localStorage.setItem(THEME_KEY, state.theme);
+  writeStorage('bussradar.stop', JSON.stringify(state.selectedStop));
+  writeStorage('bussradar.favoriteStops', JSON.stringify(state.favoriteStops));
+  writeStorage('bussradar.lineColors', JSON.stringify(state.lineColors));
+  writeStorage('bussradar.lineEmphasis', JSON.stringify(state.lineEmphasis));
+  writeStorage(THEME_KEY, state.theme);
 }
 
 function setTheme(theme, shouldSave = true) {
   state.theme = theme === 'dark' ? 'dark' : 'light';
-  localStorage.setItem(THEME_KEY, state.theme);
+  writeStorage(THEME_KEY, state.theme);
   applyTheme(state.theme);
   if (shouldSave) {
     queuePreferenceSave();
@@ -1257,8 +1260,10 @@ function setMapTileTheme(theme) {
 }
 
 function loadInitialData() {
-  els.selectedStopName.textContent = state.selectedStop.name;
-  els.toggleSchools.classList.toggle('muted', !state.schoolsVisible);
+  if (els.selectedStopName) {
+    els.selectedStopName.textContent = state.selectedStop.name;
+  }
+  els.toggleSchools?.classList.toggle('muted', !state.schoolsVisible);
   placeStopMarker(state.selectedStop);
   renderFavoriteStops();
   renderTransferPanel();
@@ -2060,12 +2065,8 @@ function resetTransferSelection() {
   state.transfer.departureError = '';
   state.transfer.departureRequestId += 1;
 
-  try {
-    localStorage.removeItem(TRANSFER_STOP_KEY);
-    localStorage.removeItem(TRANSFER_TARGET_LINE_KEY);
-  } catch {
-    // Ignore storage failures; the live UI state is still reset.
-  }
+  removeStorage(TRANSFER_STOP_KEY);
+  removeStorage(TRANSFER_TARGET_LINE_KEY);
 
   if (els.transferTargetLine) {
     els.transferTargetLine.value = '';
@@ -2095,7 +2096,9 @@ async function searchTransferStops() {
     return;
   }
 
-  els.transferStopResults.innerHTML = '<div class="empty-state">Otsin...</div>';
+  if (els.transferStopResults) {
+    els.transferStopResults.innerHTML = '<div class="empty-state">Otsin...</div>';
+  }
   const params = new URLSearchParams({ action: 'stops', q: query, type: activeTransportType() });
 
   try {
@@ -2233,19 +2236,11 @@ function queueFirstVisitOnboarding() {
 }
 
 function hasSeenOnboarding() {
-  try {
-    return localStorage.getItem(ONBOARDING_KEY) === 'done';
-  } catch (error) {
-    return false;
-  }
+  return readStorage(ONBOARDING_KEY, '') === 'done';
 }
 
 function markOnboardingSeen() {
-  try {
-    localStorage.setItem(ONBOARDING_KEY, 'done');
-  } catch (error) {
-    // Private browsing can block localStorage; the tour still works without saving.
-  }
+  writeStorage(ONBOARDING_KEY, 'done');
 }
 
 function onboardingSteps() {
@@ -4609,7 +4604,9 @@ function selectStop(stop) {
   clearScheduleStopHighlight();
   state.selectedStop = stop;
   saveStop(stop);
-  els.selectedStopName.textContent = stop.name;
+  if (els.selectedStopName) {
+    els.selectedStopName.textContent = stop.name;
+  }
   placeStopMarker(stop);
   fetchDepartures(stop);
 }
@@ -6380,21 +6377,27 @@ function normalizeScheduleText(value) {
 }
 
 function renderScheduleDirections() {
+  const hasRoutes = state.scheduleRoutes.length > 0;
+
   if (els.scheduleDirectionSelect) {
-    if (state.scheduleRoutes.length === 0) {
+    if (!hasRoutes) {
       els.scheduleDirectionSelect.innerHTML = '<option value="">Suund puudub</option>';
       els.scheduleDirectionSelect.disabled = true;
-      return;
+    } else {
+      els.scheduleDirectionSelect.disabled = false;
+      els.scheduleDirectionSelect.innerHTML = state.scheduleRoutes.map((route, index) => {
+        return `<option value="${index}">${escapeHtml(scheduleDirectionTitle(route, index))} (${escapeHtml(scheduleDirectionMeta(route, index))})</option>`;
+      }).join('');
+      els.scheduleDirectionSelect.value = String(state.scheduleRouteIndex);
     }
-
-    els.scheduleDirectionSelect.disabled = false;
-    els.scheduleDirectionSelect.innerHTML = state.scheduleRoutes.map((route, index) => {
-      return `<option value="${index}">${escapeHtml(scheduleDirectionTitle(route, index))} (${escapeHtml(scheduleDirectionMeta(route, index))})</option>`;
-    }).join('');
-    els.scheduleDirectionSelect.value = String(state.scheduleRouteIndex);
   }
 
   if (!els.scheduleDirections) {
+    return;
+  }
+
+  if (!hasRoutes) {
+    els.scheduleDirections.innerHTML = '';
     return;
   }
 
@@ -8625,19 +8628,35 @@ async function fetchJson(url, options = {}) {
       ...(options.headers || {}),
     },
   });
-  const data = await response.json();
+  let data = null;
+  try {
+    data = await response.json();
+  } catch {
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    throw new Error('API vastus ei olnud JSON.');
+  }
   if (!response.ok || data.ok === false) {
-    throw new Error(data.error || 'Päring ebaõnnestus.');
+    throw new Error(data?.error || `Päring ebaõnnestus (HTTP ${response.status}).`);
   }
   return data;
 }
 
 function setStatus(text, ok) {
+  if (!els.connectionStatus) {
+    return;
+  }
+
   els.connectionStatus.textContent = text;
   els.connectionStatus.classList.toggle('is-ok', ok);
 }
 
 function renderInlineError(container, message) {
+  if (!container) {
+    return;
+  }
+
   container.innerHTML = `<div class="empty-state error">${escapeHtml(message)}</div>`;
 }
 
@@ -8649,9 +8668,54 @@ function linesStorageKey(type = activeTransportType()) {
   return `bussradar.lines.${sanitizeTransportType(type)}`;
 }
 
+function readStorage(key, fallback = '') {
+  try {
+    const value = localStorage.getItem(key);
+    return value === null ? fallback : value;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeStorage(key, value) {
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function removeStorage(key) {
+  try {
+    localStorage.removeItem(key);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function readSessionStorage(key, fallback = '') {
+  try {
+    const value = sessionStorage.getItem(key);
+    return value === null ? fallback : value;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeSessionStorage(key, value) {
+  try {
+    sessionStorage.setItem(key, value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function loadTransportType() {
   try {
-    return sanitizeTransportType(localStorage.getItem(TRANSPORT_TYPE_KEY) || 'bus');
+    return sanitizeTransportType(readStorage(TRANSPORT_TYPE_KEY, 'bus'));
   } catch {
     return 'bus';
   }
@@ -8659,25 +8723,21 @@ function loadTransportType() {
 
 function loadTramBusOverlay() {
   try {
-    return localStorage.getItem(TRAM_BUS_OVERLAY_KEY) !== 'off';
+    return readStorage(TRAM_BUS_OVERLAY_KEY, 'on') !== 'off';
   } catch {
     return true;
   }
 }
 
 function saveTramBusOverlay() {
-  try {
-    localStorage.setItem(TRAM_BUS_OVERLAY_KEY, state.showBusesInTram ? 'on' : 'off');
-  } catch {
-    // The toggle still works for the current session if localStorage is blocked.
-  }
+  writeStorage(TRAM_BUS_OVERLAY_KEY, state.showBusesInTram ? 'on' : 'off');
 }
 
 function loadLines(type = activeTransportType()) {
   const normalizedType = sanitizeTransportType(type);
   try {
     const storageKey = linesStorageKey(normalizedType);
-    const raw = localStorage.getItem(storageKey) || (normalizedType === 'bus' ? localStorage.getItem('bussradar.lines') : 'null');
+    const raw = readStorage(storageKey, '') || (normalizedType === 'bus' ? readStorage('bussradar.lines', '') : 'null');
     const stored = JSON.parse(raw || 'null');
     if (Array.isArray(stored) && stored.length > 0) {
       return stored.map((line) => normalizeLineForTransport(line, normalizedType)).filter(Boolean);
@@ -8690,16 +8750,16 @@ function loadLines(type = activeTransportType()) {
 }
 
 function saveLines() {
-  localStorage.setItem(linesStorageKey(activeTransportType()), JSON.stringify(state.selectedLines));
+  writeStorage(linesStorageKey(activeTransportType()), JSON.stringify(state.selectedLines));
   if (activeTransportType() === 'bus') {
-    localStorage.setItem('bussradar.lines', JSON.stringify(state.selectedLines));
+    writeStorage('bussradar.lines', JSON.stringify(state.selectedLines));
   }
   queuePreferenceSave();
 }
 
 function loadLineColors() {
   try {
-    const stored = JSON.parse(localStorage.getItem('bussradar.lineColors') || '{}');
+    const stored = JSON.parse(readStorage('bussradar.lineColors', '{}') || '{}');
     if (stored && typeof stored === 'object') {
       return sanitizeLineColors(stored);
     }
@@ -8711,13 +8771,13 @@ function loadLineColors() {
 }
 
 function saveLineColors() {
-  localStorage.setItem('bussradar.lineColors', JSON.stringify(state.lineColors));
+  writeStorage('bussradar.lineColors', JSON.stringify(state.lineColors));
   queuePreferenceSave();
 }
 
 function loadLineEmphasis() {
   try {
-    const stored = JSON.parse(localStorage.getItem('bussradar.lineEmphasis') || '{}');
+    const stored = JSON.parse(readStorage('bussradar.lineEmphasis', '{}') || '{}');
     if (stored && typeof stored === 'object') {
       return sanitizeLineEmphasis(stored);
     }
@@ -8729,7 +8789,7 @@ function loadLineEmphasis() {
 }
 
 function saveLineEmphasis() {
-  localStorage.setItem('bussradar.lineEmphasis', JSON.stringify(state.lineEmphasis));
+  writeStorage('bussradar.lineEmphasis', JSON.stringify(state.lineEmphasis));
   queuePreferenceSave();
 }
 
@@ -8740,8 +8800,8 @@ function scheduleLineStorageKey(type = activeTransportType()) {
 function loadScheduleLine(type = activeTransportType()) {
   const normalizedType = sanitizeTransportType(type);
   try {
-    const raw = localStorage.getItem(scheduleLineStorageKey(normalizedType))
-      || (normalizedType === 'bus' ? localStorage.getItem('bussradar.scheduleLine') : '');
+    const raw = readStorage(scheduleLineStorageKey(normalizedType), '')
+      || (normalizedType === 'bus' ? readStorage('bussradar.scheduleLine', '') : '');
     const stored = normalizeLineForTransport(raw || '', normalizedType);
     if (stored) {
       return stored;
@@ -8755,9 +8815,9 @@ function loadScheduleLine(type = activeTransportType()) {
 
 function saveScheduleLine() {
   if (state.scheduleLine) {
-    localStorage.setItem(scheduleLineStorageKey(activeTransportType()), state.scheduleLine);
+    writeStorage(scheduleLineStorageKey(activeTransportType()), state.scheduleLine);
     if (activeTransportType() === 'bus') {
-      localStorage.setItem('bussradar.scheduleLine', state.scheduleLine);
+      writeStorage('bussradar.scheduleLine', state.scheduleLine);
     }
   }
 }
@@ -8784,7 +8844,7 @@ function lineMapOpacity(line, type = activeTransportType()) {
 
 function loadStop() {
   try {
-    const stored = JSON.parse(localStorage.getItem('bussradar.stop') || 'null');
+    const stored = JSON.parse(readStorage('bussradar.stop', 'null') || 'null');
     if (stored && stored.id) return stored;
   } catch {
     return DEFAULT_STOP;
@@ -8794,13 +8854,13 @@ function loadStop() {
 }
 
 function saveStop(stop) {
-  localStorage.setItem('bussradar.stop', JSON.stringify(stop));
+  writeStorage('bussradar.stop', JSON.stringify(stop));
   queuePreferenceSave();
 }
 
 function loadTransferStop() {
   try {
-    const stored = JSON.parse(localStorage.getItem(TRANSFER_STOP_KEY) || 'null');
+    const stored = JSON.parse(readStorage(TRANSFER_STOP_KEY, 'null') || 'null');
     if (isStopCoordinate(stored)) {
       return normalizeStopForStorage(stored);
     }
@@ -8813,13 +8873,13 @@ function loadTransferStop() {
 
 function saveTransferStop(stop) {
   if (isStopCoordinate(stop)) {
-    localStorage.setItem(TRANSFER_STOP_KEY, JSON.stringify(normalizeStopForStorage(stop)));
+    writeStorage(TRANSFER_STOP_KEY, JSON.stringify(normalizeStopForStorage(stop)));
   }
 }
 
 function loadTransferTargetLine() {
   try {
-    return normalizeLine(localStorage.getItem(TRANSFER_TARGET_LINE_KEY) || '');
+    return normalizeLine(readStorage(TRANSFER_TARGET_LINE_KEY, ''));
   } catch {
     return '';
   }
@@ -8827,15 +8887,15 @@ function loadTransferTargetLine() {
 
 function saveTransferTargetLine() {
   if (state.transfer.targetLine) {
-    localStorage.setItem(TRANSFER_TARGET_LINE_KEY, state.transfer.targetLine);
+    writeStorage(TRANSFER_TARGET_LINE_KEY, state.transfer.targetLine);
   } else {
-    localStorage.removeItem(TRANSFER_TARGET_LINE_KEY);
+    removeStorage(TRANSFER_TARGET_LINE_KEY);
   }
 }
 
 function loadFavoriteStops() {
   try {
-    const stored = JSON.parse(localStorage.getItem('bussradar.favoriteStops') || '[]');
+    const stored = JSON.parse(readStorage('bussradar.favoriteStops', '[]') || '[]');
     if (Array.isArray(stored)) {
       return stored.filter(isStopCoordinate).map(normalizeStopForStorage);
     }
@@ -8847,7 +8907,7 @@ function loadFavoriteStops() {
 }
 
 function saveFavoriteStops() {
-  localStorage.setItem('bussradar.favoriteStops', JSON.stringify(state.favoriteStops));
+  writeStorage('bussradar.favoriteStops', JSON.stringify(state.favoriteStops));
   queuePreferenceSave();
 }
 
@@ -8871,7 +8931,7 @@ function stopKey(stop) {
 
 function loadTheme() {
   try {
-    return localStorage.getItem(THEME_KEY) === 'dark' ? 'dark' : 'light';
+    return readStorage(THEME_KEY, 'light') === 'dark' ? 'dark' : 'light';
   } catch {
     return 'light';
   }
@@ -9008,17 +9068,18 @@ function cssString(value) {
 function registerServiceWorker() {
   if ('serviceWorker' in navigator) {
     let reloadedForWorker = false;
+    const reloadKey = `bussradar.swReloaded.${APP_VERSION}`;
     navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (reloadedForWorker || sessionStorage.getItem('bussradar.swReloaded') === '201') {
+      if (reloadedForWorker || readSessionStorage(reloadKey, '') === 'done') {
         return;
       }
 
       reloadedForWorker = true;
-      sessionStorage.setItem('bussradar.swReloaded', '201');
+      writeSessionStorage(reloadKey, 'done');
       window.location.reload();
     });
 
-    navigator.serviceWorker.register('service-worker.js?v=202').then((registration) => {
+    navigator.serviceWorker.register(`service-worker.js?v=${APP_VERSION}`).then((registration) => {
       registration.update?.();
 
       if (registration.waiting) {

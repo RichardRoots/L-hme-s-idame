@@ -156,12 +156,20 @@ function syncAuthState(data, message = '') {
 
 function renderAuthUi(message = '', tone = '') {
   const signedIn = Boolean(state.user);
-  els.authStatus.textContent = signedIn ? state.user.username : 'Pole sisse logitud';
-  els.authForm.hidden = signedIn;
-  els.signedInActions.hidden = !signedIn;
-  els.authMessage.textContent = message || (signedIn ? 'Sisse logitud.' : '');
-  els.authMessage.classList.toggle('is-error', tone === 'error');
-  els.authMessage.classList.toggle('is-success', tone === 'success');
+  if (els.authStatus) {
+    els.authStatus.textContent = signedIn ? state.user.username : 'Pole sisse logitud';
+  }
+  if (els.authForm) {
+    els.authForm.hidden = signedIn;
+  }
+  if (els.signedInActions) {
+    els.signedInActions.hidden = !signedIn;
+  }
+  if (els.authMessage) {
+    els.authMessage.textContent = message || (signedIn ? 'Sisse logitud.' : '');
+    els.authMessage.classList.toggle('is-error', tone === 'error');
+    els.authMessage.classList.toggle('is-success', tone === 'success');
+  }
 }
 
 function setBusy(isBusy, action = '') {
@@ -259,14 +267,26 @@ async function fetchJson(url, options = {}) {
       ...(options.headers || {}),
     },
   });
-  const data = await response.json();
+  let data = null;
+  try {
+    data = await response.json();
+  } catch {
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    throw new Error('API vastus ei olnud JSON.');
+  }
   if (!response.ok || data.ok === false) {
-    throw new Error(data.error || 'Päring ebaõnnestus.');
+    throw new Error(data?.error || `Päring ebaõnnestus (HTTP ${response.status}).`);
   }
   return data;
 }
 
 function togglePasswordVisibility() {
+  if (!els.authPassword || !els.passwordToggle) {
+    return;
+  }
+
   const shouldShow = els.authPassword.type === 'password';
   els.authPassword.type = shouldShow ? 'text' : 'password';
   els.passwordToggle.setAttribute('aria-pressed', String(shouldShow));
@@ -317,6 +337,10 @@ function applyTheme(theme) {
   const normalizedTheme = theme === 'dark' ? 'dark' : 'light';
   document.documentElement.dataset.theme = normalizedTheme;
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', normalizedTheme === 'dark' ? '#101a18' : '#0f5e62');
+
+  if (!els.themeToggle) {
+    return;
+  }
 
   const dark = normalizedTheme === 'dark';
   els.themeToggle.title = dark ? 'Hele režiim' : 'Tume režiim';
