@@ -1,4 +1,4 @@
-﻿RouteNum;Authority;City;Transport;Operator;ValidityPeriods;SpecialDates;RouteTag;RouteType;Commercial;RouteName;Weekdays;Streets;RouteStops;RouteStopsPlatforms;Pikas2026.8.4
+RouteNum;Authority;City;Transport;Operator;ValidityPeriods;SpecialDates;RouteTag;RouteType;Commercial;RouteName;Weekdays;Streets;RouteStops;RouteStopsPlatforms;Pikas2026.8.4
 1;SpecialDates;;;;20811,1,,6,54,66;;;;;;;;
 2;;;;;20697,1,,,3,1,,,,3,1,,,,3,1,,,,3,1,,,,3,1,,,,3,1,,,,3,1,,,,10,1,,,,3,1,,,,3,1,,,,3,1,,,,3,1,,,,3,1,,,,3,1,,,,17,1,,,,3,1,,,,3,1,,,,3,1,,,,3,1,,,,3,1,,,,3,1,,,,10,1,,,,3,1,,,,3,1,,,,3,1,,,4,1,,,,3,1,,,,10,1,,,,3,1,,,,3,1,,,,3,1,,,,3,1,,,,3,1,,,,3,1,,,,3,1,,,;;;;;;;;
 3;;;;;20696,56,1,,,,,,50,1,,,,,,,,,,,,,50,1,,,,,,43,1,,,,,,57,1,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,;;;;;;;;
