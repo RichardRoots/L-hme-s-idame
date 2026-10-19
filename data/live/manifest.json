@@ -1,9 +1,9 @@
 {
-  "updatedAt": "2026-10-18T22:59:28.092Z",
+  "updatedAt": "2026-10-19T00:57:13.707Z",
   "source": "https://transport.tallinn.ee",
-  "vehiclesBytes": 1572,
-  "stopsBytes": 207510,
-  "routesBytes": 364521,
+  "vehiclesBytes": 95,
+  "stopsBytes": 207461,
+  "routesBytes": 351440,
   "shapeLines": [
     "1",
     "2",
