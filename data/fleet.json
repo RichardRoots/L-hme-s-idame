@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-11-02T16:47:27.1694796Z",
+  "updatedAt": "2026-11-02T23:42:49.2319508Z",
   "sources": [
     "https://ebus.ee/index.php?a=ps&did=8&v=list",
     "https://ebus.ee/index.php?a=ps&did=13&v=list"
@@ -2056,25 +2056,6 @@
       "isElectric": false,
       "isArticulated": false,
       "badge": "12"
-    },
-    "1341": {
-      "id": "1341",
-      "registration": "341 TAK",
-      "model": "Berkhof Excellence 2000",
-      "year": "1988",
-      "factoryNumber": "1030",
-      "inServiceSince": "05.1996",
-      "note": "üle antud AS TAK-Reisid",
-      "sourceUrl": "https://ebus.ee/index.php?a=ps&did=8&v=list",
-      "size": "unknown",
-      "sizeLabel": "Pikkus teadmata",
-      "lengthMeters": null,
-      "power": "diesel",
-      "powerLabel": "Diisel",
-      "powerShort": "diisel",
-      "isElectric": false,
-      "isArticulated": false,
-      "badge": "?"
     },
     "1347": {
       "id": "1347",
